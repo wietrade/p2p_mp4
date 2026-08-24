@@ -80,7 +80,8 @@
     window.PEAR_BACKEND = new URLSearchParams(location.search).get('backend') || 'https://bot3.1230sb.com/p2p_mp4'
     function playerUrl(query) {
       var b = window.PEAR_BACKEND ? 'backend=' + encodeURIComponent(window.PEAR_BACKEND) + '&' : ''
-      return '/?' + b + query
+      // 用当前目录相对路径（兼容 GitHub Pages 子目录部署，如 /p2p_mp4/）
+      return './?' + b + query
     }
     var $ = function (id) { return document.getElementById(id) }
 
