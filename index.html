@@ -309,8 +309,8 @@
               log('   magnet=' + (v.magnetURI || '').slice(0, 60) + '...', 'ok');
               log('   torrent=' + (playerTorrentUrl || '无（靠磁力 metadata 交换）'), 'ok');
               log('   tracker=' + playerTrackers.join(', '), 'ok');
-              // HTTP 源：本地文件则直接服务；次级方案走 /proxy/{id} 回源原链接（跨域部署时后端在 PEAR_BACKEND）
-              videoEl.src = v.localFile ? (window.PEAR_BACKEND + '/' + v.rel) : (window.PEAR_BACKEND + '/proxy/' + v.id);
+              // HTTP 源：直连外链 CDN（服务端零视频上行）；仅本地文件时才走后端静态服务
+              videoEl.src = v.localFile ? (window.PEAR_BACKEND + '/' + v.rel) : v.url;
               startPlayer();
             } else {
               log('视频注册失败: ' + ((data && data.error) || 'unknown'), 'err');
