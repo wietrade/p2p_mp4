@@ -132,8 +132,8 @@
     };
   </script>
 
-  <!-- 加载重新构建的播放器（已支持 window.PearConfig 覆盖后端地址） -->
-  <script src="/pear-player.js"></script>
+  <!-- 加载重新构建的播放器（已支持 window.PearConfig 覆盖后端地址）；相对路径兼容 GitHub Pages 子目录 -->
+  <script src="./pear-player.js"></script>
   <script>
     function log(msg, cls) {
       var div = document.getElementById('log');
