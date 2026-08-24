@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PearPlayer 功能测试台</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; margin: 20px; background: #1e1e1e; color: #ccc; }
+    h3 { color: #fff; margin: 0 0 4px; }
+    .sub { color: #8b949e; font-size: 12px; margin-bottom: 16px; }
+    section { background: #252526; border: 1px solid #3a3d41; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+    section h4 { margin: 0 0 12px; color: #e6edf3; font-size: 14px; }
+    label { display: block; font-size: 12px; color: #8b949e; margin: 8px 0 4px; }
+    input[type=text] { width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; color: #e6edf3; border-radius: 6px; padding: 8px 10px; font-family: Consolas, monospace; font-size: 13px; }
+    button { background: #0969da; color: #fff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; cursor: pointer; margin-top: 10px; }
+    button:hover { background: #0a6fe0; }
+    button.sec { background: #21262d; border: 1px solid #30363d; color: #e6edf3; }
+    button.mini { margin: 0; padding: 2px 8px; font-size: 12px; }
+    pre { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; font-size: 12px; overflow: auto; max-height: 240px; white-space: pre-wrap; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #30363d; vertical-align: middle; }
+    th { color: #8b949e; font-weight: normal; }
+    .ok { color: #7ee787; } .warn { color: #e3b341; } .err { color: #ff7b72; } .info { color: #79c0ff; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+    .badge.local { background: #2ea04333; color: #7ee787; border: 1px solid #2ea04355; }
+    .badge.xs { background: #1f6feb33; color: #79c0ff; border: 1px solid #1f6feb55; }
+    .badge.downloadmeta { background: #bf870033; color: #e3b341; border: 1px solid #bf870055; }
+    .badge.none { background: #484f5833; color: #8b949e; border: 1px solid #484f5855; }
+    iframe#player { width: 100%; height: 520px; border: 1px solid #30363d; border-radius: 8px; background: #000; margin-top: 10px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .mono { font-family: Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <h3>🧪 PearPlayer 功能测试台</h3>
+  <div class="sub">测试：视频注册（url + magnet）、.torrent 引导（local / xs / downloadmeta）、节点 API、播放。页面：<span class="mono">http://127.0.0.1:8000/test.html</span></div>
+
+  <!-- ① 注册表单 -->
+  <section>
+    <h4>① 视频注册（POST /v1/videos）</h4>
+    <label>视频 URL（HTTP 外链）</label>
+    <input id="in-url" type="text" placeholder="https://bot3.1230sb.com/bbb.mp4">
+    <label>磁力链接 magnet（可带 xs= .torrent 直链参数）</label>
+    <input id="in-magnet" type="text" placeholder="magnet:?xt=urn:btih:...&dn=...&tr=...">
+    <label>名称（可选）</label>
+    <input id="in-name" type="text" placeholder="kaltura.mp4">
+    <label>torrent 文件地址（可选，.torrent 直链，播放器立即引导）</label>
+    <input id="in-torrent" type="text" placeholder="http://127.0.0.1:8000/boot/kaltura.mp4.torrent">
+    <label>tracker 服务器（可选，逗号分隔多地址）</label>
+    <input id="in-tracker" type="text" placeholder="wss://bot3.1230sb.com/tracker">
+    <div class="row">
+      <button onclick="doRegister()">注册</button>
+      <button class="sec" onclick="fillBbb()">填充 bbb 示例</button>
+      <button class="sec" onclick="fillKaltura()">填充 kaltura 示例</button>
+    </div>
+    <pre id="reg-result">（注册结果将显示在这里，含 metaSource / hasTorrent / torrentUrl）</pre>
+  </section>
+
+  <!-- ② 已注册视频列表 -->
+  <section>
+    <h4>② 已注册视频（GET /v1/videos） <button class="sec mini" onclick="loadList()">刷新</button></h4>
+    <table>
+      <thead><tr><th>名称</th><th>infoHash</th><th>引导来源</th><th>torrent</th><th>操作</th></tr></thead>
+      <tbody id="list-body"><tr><td colspan="5" class="info">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- ③ 播放器 -->
+  <section>
+    <h4>③ 播放测试（iframe 内嵌播放页）</h4>
+    <div class="row">
+      <button class="sec" onclick="openPlayer()">用当前表单打开播放页</button>
+      <button class="sec" onclick="loadFirstPlayer()">播放列表第一个</button>
+    </div>
+    <iframe id="player" src="about:blank" title="播放器预览"></iframe>
+  </section>
+
+  <script>
+    // 后端 API 基础地址：默认同源（本地）；外网部署用 ?backend=https://bot3.1230sb.com/p2p_mp4
+    window.PEAR_BACKEND = new URLSearchParams(location.search).get('backend') || 'https://bot3.1230sb.com/p2p_mp4'
+    function playerUrl(query) {
+      var b = window.PEAR_BACKEND ? 'backend=' + encodeURIComponent(window.PEAR_BACKEND) + '&' : ''
+      return '/?' + b + query
+    }
+    var $ = function (id) { return document.getElementById(id) }
+
+    function api(path, opts) {
+      return fetch(window.PEAR_BACKEND + path, opts).then(function (r) { return r.json() })
+    }
+
+    function showResult(text, obj) {
+      $('reg-result').textContent = text + JSON.stringify(obj || {}, null, 2)
+    }
+
+    // ① 注册
+    function doRegister() {
+      var url = $('in-url').value.trim()
+      var magnet = $('in-magnet').value.trim()
+      var name = $('in-name').value.trim()
+      if (!url || !magnet) { showResult('请填写 url 和 magnet。\n'); return }
+      showResult('注册中…\n')
+      var body = { url: url, magnet: magnet }
+      if (name) body.name = name
+      api('/v1/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        var prefix = ''
+        if (r.video && r.video.torrentUrl) {
+          // 验证 /boot/ 托管可访问
+          return fetch(r.video.torrentUrl).then(function (hr) {
+            prefix = 'torrentUrl 可访问: ' + hr.status + ' ' + hr.statusText +
+              ' (' + (hr.headers.get('content-length') || '?') + ' bytes)\n'
+            showResult(prefix, r)
+            loadList()
+          }).catch(function () {
+            showResult('torrentUrl 访问失败。\n', r)
+            loadList()
+          })
+        }
+        showResult(prefix, r)
+        loadList()
+      }).catch(function (e) {
+        showResult('注册失败: ' + e.message + '\n')
+      })
+    }
+
+    // ② 列表
+    function metaBadge(v) {
+      var cls = v.metaSource || 'none'
+      var txt = v.metaSource || '无'
+      return '<span class="badge ' + cls + '">' + txt + '</span>'
+    }
+    function loadList() {
+      api('/v1/videos').then(function (r) {
+        var rows = (r.videos || []).map(function (v) {
+          var id = encodeURIComponent(v.id)
+          var play = playerUrl('user=' + v.id +
+            '&url=' + encodeURIComponent(v.url) +
+            '&magnet=' + encodeURIComponent(v.magnetURI || '') +
+            (v.torrentUrl ? '&torrent=' + encodeURIComponent(v.torrentUrl) : '') +
+            (v.trackers && v.trackers.length ? '&tracker=' + encodeURIComponent(v.trackers.join(',')) : ''))
+          return '<tr>' +
+            '<td>' + (v.name || '') + '</td>' +
+            '<td class="mono">' + (v.infoHash || '').slice(0, 12) + '</td>' +
+            '<td>' + metaBadge(v) + '</td>' +
+            '<td>' + (v.hasTorrent ? '<span class="ok">✓</span>' : '<span class="warn">—</span>') + '</td>' +
+            '<td>' +
+              '<button class="sec mini" onclick="viewNode(\'' + id + '\')">节点API</button> ' +
+              '<button class="sec mini" onclick="setPlayer(\'' + play + '\')">播放</button>' +
+            '</td></tr>'
+        }).join('')
+        $('list-body').innerHTML = rows ||
+          '<tr><td colspan="5" class="info">暂无注册（后端重启会清空内存注册表）</td></tr>'
+      }).catch(function (e) {
+        $('list-body').innerHTML = '<tr><td colspan="5" class="err">列表加载失败: ' + e.message + '</td></tr>'
+      })
+    }
+    function viewNode(id) {
+      api('/v1/customer/nodes?host=127.0.0.1:8000&uri=/proxy/' + id).then(function (r) {
+        showResult('节点 API（/proxy/' + id + '）:\n', r)
+      }).catch(function (e) {
+        showResult('节点 API 失败: ' + e.message + '\n')
+      })
+    }
+
+    // ③ 播放器
+    function setPlayer(url) { $('player').src = url }
+    function openPlayer() {
+      var url = $('in-url').value.trim()
+      var magnet = $('in-magnet').value.trim()
+      var torrent = $('in-torrent').value.trim()
+      var tracker = $('in-tracker').value.trim()
+      if (!url) { return }
+      setPlayer(playerUrl('url=' + encodeURIComponent(url) + '&magnet=' + encodeURIComponent(magnet) +
+        (torrent ? '&torrent=' + encodeURIComponent(torrent) : '') +
+        (tracker ? '&tracker=' + encodeURIComponent(tracker) : '')))
+    }
+    function loadFirstPlayer() {
+      api('/v1/videos').then(function (r) {
+        var v = (r.videos || [])[0]
+        if (v) setPlayer(playerUrl('user=' + v.id + '&url=' + encodeURIComponent(v.url) +
+          '&magnet=' + encodeURIComponent(v.magnetURI || '') +
+          (v.torrentUrl ? '&torrent=' + encodeURIComponent(v.torrentUrl) : '') +
+          (v.trackers && v.trackers.length ? '&tracker=' + encodeURIComponent(v.trackers.join(',')) : '')))
+      })
+    }
+
+    // 示例填充
+    function fillBbb() {
+      $('in-url').value = 'https://bot3.1230sb.com/bbb.mp4'
+      $('in-magnet').value = 'magnet:?xt=urn:btih:99b2abd7b2ac02270b20b8c3f3634dea77db497e&dn=bbb.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker'
+      $('in-name').value = 'bbb.mp4'
+      $('in-torrent').value = 'http://127.0.0.1:8000/boot/bbb.mp4.torrent'
+      $('in-tracker').value = 'wss://bot3.1230sb.com/tracker'
+    }
+    function fillKaltura() {
+      $('in-url').value = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4'
+      $('in-magnet').value = 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker'
+      $('in-name').value = 'kaltura.mp4'
+      $('in-torrent').value = 'http://127.0.0.1:8000/boot/kaltura.mp4.torrent'
+      $('in-tracker').value = 'wss://bot3.1230sb.com/tracker'
+    }
+
+    // 默认预填大文件（kaltura 100MB）
+    fillKaltura()
+    loadList()
+  </script>
+</body>
+</html>

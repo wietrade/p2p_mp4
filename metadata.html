@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Metadata Boot（浏览器端 metadata 引导）</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; background: #1e1e1e; color: #ccc; margin: 24px; }
+    .ok { color: #7ee787; } .err { color: #ff7b72; } .warn { color: #e3b341; }
+    pre { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h3>Metadata Boot（浏览器端 metadata 引导，不做数据上行）</h3>
+  <pre id="log"></pre>
+
+  <script src="/webtorrent.min.js"></script>
+  <script>
+    function log(msg, cls) {
+      var pre = document.getElementById('log');
+      pre.innerHTML += '<div class="' + (cls || '') + '">[' + new Date().toLocaleTimeString() + '] ' + msg + '</div>';
+    }
+
+    var TRACKER = 'wss://bot3.1230sb.com/tracker';
+    // 后端 /boot/ 地址：默认同源（本地）；外网部署用 ?backend=https://bot3.1230sb.com/p2p_mp4
+    var BACKEND = new URLSearchParams(location.search).get('backend') || 'https://bot3.1230sb.com/p2p_mp4';
+    // 要引导的 torrent（.torrent 由后端 /boot/ 提供，含 piece 哈希 = metadata）
+    var TORRENT_FILES = ['bbb.mp4.torrent', 'kaltura.mp4.torrent', 'demo.mp4.torrent'];
+
+    var client = new WebTorrent({
+      tracker: {
+        rtcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+      }
+    });
+
+    function boot(name) {
+      log('加载 ' + name + ' ...');
+      // WebTorrent 支持 http URL 直接下载 torrent 文件（内部解析 metadata）
+      client.add(BACKEND + '/boot/' + name, { announce: [TRACKER] }, function (torrent) {
+        log('✅ ' + torrent.name + ' metadata 就绪 infoHash=' + torrent.infoHash + ' pieces=' + torrent.pieces.length, 'ok');
+        // 关键：不 select 任何 piece —— 只提供 metadata 引导，不下载/不做数据上行
+        torrent.on('wire', function (wire, addr) {
+          log('新 peer: ' + (addr || wire.remoteAddress || '?'));
+        });
+      });
+    }
+
+    TORRENT_FILES.forEach(boot);
+    client.on('error', function (e) { log('client error: ' + e.message, 'err'); });
+
+    setInterval(function () {
+      var total = client.torrents.reduce(function (a, t) { return a + t.numPeers; }, 0);
+      log('状态: metadata 数=' + client.torrents.length + ' peers=' + total, 'warn');
+    }, 20000);
+  </script>
+</body>
+</html>
