@@ -155,8 +155,21 @@
     }
 
     // ===== 统计面板（API 方式：POST /v1/stats 上报 → 后端聚合 → GET 轮询渲染） =====
-    // 每个页面唯一 id（避免多页面 url 相同 → id 相同 → stats 互相覆盖）
-    var me = new URLSearchParams(location.search).get('user') || ('u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    // 客户端唯一标识：优先 ?user=（测试多客户端用）；否则用 localStorage 持久 id。
+    // 刷新/重开页面复用同一 id → 后端按 user 覆盖 → 在线人数不会随刷新虚增。
+    // 同一浏览器多标签页共享同一 id（按"客户端"计人数，更符合真实语义）。
+    var me = new URLSearchParams(location.search).get('user');
+    if (!me) {
+      try {
+        me = localStorage.getItem('pear_client_id');
+        if (!me) {
+          me = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+          localStorage.setItem('pear_client_id', me);
+        }
+      } catch (e) {
+        me = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      }
+    }
     document.getElementById('stat-user').textContent = '（用户 ' + me + '）';
 
     // 本页状态（播放器事件 → myState → POST 上报）
