@@ -252,7 +252,11 @@ Worker.prototype._getNodes = function (token, cb) {
             if (res.size) {                         //如果filesize大于0
                 self.fileLength = res.size;
 
-                self.torrentUrl = res.torrents['512'];
+                // .torrent 直链：优先用前端传入的 torrentUrl（如 GitHub 托管）；
+                // 仅当前端未提供时才用节点 API 的 torrents["512"] 兜底（避免被空值覆盖导致退化纯 magnet）
+                if (!self.torrentUrl && res.torrents && res.torrents['512']) {
+                    self.torrentUrl = res.torrents['512'];
+                }
 
 
                 if (!res.nodes){                            //如果没有可用节点则切换到纯webrtc模式
