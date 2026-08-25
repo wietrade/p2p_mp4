@@ -35454,6 +35454,7 @@ RTCDownloader.prototype._setupSimpleRTC = function (simpleRTC) {
 };
 
 },{"./simple-RTC":237,"buffer/":45,"debug":57,"events":44,"inherits":88}],239:[function(require,module,exports){
+(function (Buffer){(function (){
 /**
  * Created by xieting on 2017/11/9.
  */
@@ -36031,7 +36032,8 @@ Worker.prototype._startPlaying = function (nodes) {
                     })
                     .then(function (buf) {
                         debug('torrentUrl loaded: ' + self.torrentUrl + ' (' + buf.byteLength + ' bytes)');
-                        client.add(new Uint8Array(buf), addOpts, torrentReady);
+                        // 必须用 Buffer（webtorrent parse-torrent 只认 Buffer；Uint8Array 会抛 Invalid torrent identifier）
+                        client.add(Buffer.from(buf), addOpts, torrentReady);
                     })
                     .catch(function (e) {
                         debug('torrentUrl fetch failed: ' + e.message + ', fallback to magnet');
@@ -36277,5 +36279,6 @@ function makeCandidateArr(sdp) {
 }
 
 
-},{"./dispatcher":217,"./file":219,"./http-downloader":220,"./node-filter":228,"./node-scheduler":229,"./pear-torrent":231,"./peerid-generator":232,"./piece-validator":233,"./range-loader":234,"./reporter":235,"./set":236,"./webrtc-downloader-bin":238,"blueimp-md5":41,"debug":57,"events":44,"inherits":88,"url":199}]},{},[1])(1)
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"./dispatcher":217,"./file":219,"./http-downloader":220,"./node-filter":228,"./node-scheduler":229,"./pear-torrent":231,"./peerid-generator":232,"./piece-validator":233,"./range-loader":234,"./reporter":235,"./set":236,"./webrtc-downloader-bin":238,"blueimp-md5":41,"buffer":45,"debug":57,"events":44,"inherits":88,"url":199}]},{},[1])(1)
 });
