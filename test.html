@@ -40,14 +40,10 @@
     <h4>① 视频注册（POST /v1/videos）</h4>
     <label>视频 URL（HTTP 外链）</label>
     <input id="in-url" type="text" placeholder="https://bot3.1230sb.com/bbb.mp4">
-    <label>磁力链接 magnet（可带 xs= .torrent 直链参数）</label>
-    <input id="in-magnet" type="text" placeholder="magnet:?xt=urn:btih:...&dn=...&tr=...">
-    <label>名称（可选）</label>
-    <input id="in-name" type="text" placeholder="kaltura.mp4">
-    <label>torrent 文件地址（可选，.torrent 直链，播放器立即引导）</label>
-    <input id="in-torrent" type="text" placeholder="http://127.0.0.1:8000/boot/kaltura.mp4.torrent">
-    <label>tracker 服务器（可选，逗号分隔多地址）</label>
-    <input id="in-tracker" type="text" placeholder="wss://bot3.1230sb.com/tracker">
+    <label>磁力链接 magnet</label>
+    <input id="in-magnet" type="text" placeholder="magnet:?xt=urn:btih:...&dn=...">
+    <label>BitTorrent 种子文件地址（.torrent 外链，如 GitHub；可选，无则靠磁力 metadata 交换）</label>
+    <input id="in-torrent" type="text" placeholder="https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent">
     <div class="row">
       <button onclick="doRegister()">注册</button>
       <button class="sec" onclick="fillBbb()">填充 bbb 示例</button>
@@ -93,15 +89,15 @@
       $('reg-result').textContent = text + JSON.stringify(obj || {}, null, 2)
     }
 
-    // ① 注册
+    // ① 注册（自动完成：后端下载种子 → 解析校验 → 托管 → 返回 GitHub 下载地址；tracker/name 自动）
     function doRegister() {
       var url = $('in-url').value.trim()
       var magnet = $('in-magnet').value.trim()
-      var name = $('in-name').value.trim()
+      var torrent = $('in-torrent').value.trim()
       if (!url || !magnet) { showResult('请填写 url 和 magnet。\n'); return }
-      showResult('注册中…\n')
+      showResult('注册中…（后端自动：下载种子 → 解析 → 托管）\n')
       var body = { url: url, magnet: magnet }
-      if (name) body.name = name
+      if (torrent) body.torrentUrl = torrent
       api('/v1/videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,17 +162,15 @@
       })
     }
 
-    // ③ 播放器
+    // ③ 播放器（tracker/torrent 由播放页从后端 API 自动获取，无需手填）
     function setPlayer(url) { $('player').src = url }
     function openPlayer() {
       var url = $('in-url').value.trim()
       var magnet = $('in-magnet').value.trim()
       var torrent = $('in-torrent').value.trim()
-      var tracker = $('in-tracker').value.trim()
       if (!url) { return }
       setPlayer(playerUrl('url=' + encodeURIComponent(url) + '&magnet=' + encodeURIComponent(magnet) +
-        (torrent ? '&torrent=' + encodeURIComponent(torrent) : '') +
-        (tracker ? '&tracker=' + encodeURIComponent(tracker) : '')))
+        (torrent ? '&torrent=' + encodeURIComponent(torrent) : '')))
     }
     function loadFirstPlayer() {
       api('/v1/videos').then(function (r) {
@@ -188,20 +182,16 @@
       })
     }
 
-    // 示例填充
+    // 示例填充（用户只需 url + magnet + 种子地址）
     function fillBbb() {
       $('in-url').value = 'https://bot3.1230sb.com/bbb.mp4'
-      $('in-magnet').value = 'magnet:?xt=urn:btih:99b2abd7b2ac02270b20b8c3f3634dea77db497e&dn=bbb.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker'
-      $('in-name').value = 'bbb.mp4'
-      $('in-torrent').value = 'http://127.0.0.1:8000/boot/bbb.mp4.torrent'
-      $('in-tracker').value = 'wss://bot3.1230sb.com/tracker'
+      $('in-magnet').value = 'magnet:?xt=urn:btih:99b2abd7b2ac02270b20b8c3f3634dea77db497e&dn=bbb.mp4'
+      $('in-torrent').value = 'https://wietrade.github.io/p2p_mp4/torrents/bbb.mp4.torrent'
     }
     function fillKaltura() {
       $('in-url').value = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4'
-      $('in-magnet').value = 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker'
-      $('in-name').value = 'kaltura.mp4'
-      $('in-torrent').value = 'http://127.0.0.1:8000/boot/kaltura.mp4.torrent'
-      $('in-tracker').value = 'wss://bot3.1230sb.com/tracker'
+      $('in-magnet').value = 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4'
+      $('in-torrent').value = 'https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent'
     }
 
     // 默认预填大文件（kaltura 100MB）
