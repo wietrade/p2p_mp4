@@ -33,11 +33,7 @@
     /* 块统计卡片区 */
     .blocks-card { background: #1c2333; border: 1px solid #2d333b; border-radius: 14px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
     .blocks-card .b-title { font-size: 13px; color: #e6edf3; margin-bottom: 10px; display: flex; justify-content: space-between; }
-    .blocks-card .b-title span:last-child { color: #7ee787; font-size: 12px; }
-    .prog-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .prog-row .bar { flex: 1; height: 10px; background: #0d1117; border-radius: 5px; overflow: hidden; }
-    .prog-row .bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #0969da, #58a6ff); border-radius: 5px; transition: width .4s; }
-    .prog-row span { font-family: Consolas, monospace; font-size: 13px; color: #58a6ff; min-width: 52px; text-align: right; }
+    .blocks-card .b-title span:last-child { color: #58a6ff; font-size: 12px; }
     .block-grid { display: flex; gap: 10px; margin-bottom: 12px; }
     .block-item { flex: 1; background: #161b26; border-radius: 10px; padding: 10px; text-align: center; }
     .block-item .b-num { font-size: 22px; font-weight: 700; font-family: Consolas, monospace; }
@@ -90,13 +86,9 @@
       </div>
     </div>
 
-    <!-- ② 块统计区：进度 + 三格块数 + 堆叠条 -->
+    <!-- ② 块统计区：三格块数 + 单一条（长度=进度，分段=来源构成） -->
     <div class="blocks-card">
-      <div class="b-title">📦 块统计</div>
-      <div class="prog-row">
-        <div class="bar"><div id="bar-prog" class="fill"></div></div>
-        <span id="num-prog">0.0%</span>
-      </div>
+      <div class="b-title">📦 块统计 <span id="num-prog">0.0%</span></div>
       <div class="block-grid">
         <div class="block-item p2p">
           <div class="b-num" id="num-p2p">0</div>
@@ -195,9 +187,12 @@
     // 每 2 秒：计算速度 → POST 上报 → GET 拉取 → 渲染面板
     function syncStats() {
       function calc(arr) {
+        if (!arr.length) return 0;
         var total = 0;
         for (var i = 0; i < arr.length; i++) total += arr[i].bytes;
-        return total / 3; // 3 秒窗口 → bytes/s
+        // 按实际窗口时间跨度计算（避免启动初期窗口不满、除以固定 3 导致速度低估）
+        var span = (arr[arr.length - 1].t - arr[0].t) / 1000;
+        return span <= 0 ? total : total / span;  // 单样本 = 即时速率
       }
       myState.httpSpeed = calc(speedLog.HTTP);
       myState.p2pDlSpeed = calc(speedLog.P2P);
@@ -236,13 +231,11 @@
       document.getElementById('num-http').textContent = http;
       document.getElementById('num-ratio').textContent = (sum ? (p2p / sum * 100).toFixed(1) : 0) + '%';
 
-      // 进度
-      var prog = u.progress || 0;
-      document.getElementById('bar-prog').style.width = prog + '%';
-      document.getElementById('num-prog').textContent = prog.toFixed(1) + '%';
-
-      // 堆叠条（占总块比例）
+      // 单一条：长度 = 进度（P2P绿 + HTTP黄 各占已下载比例），分段 = 来源构成
+      // 例：100 块，HTTP 20 + P2P 25 → 条长 45%（绿25% + 黄20%），进度文字 45.0%
       var total = u.totalChunks || 1;
+      var prog = total ? ((p2p + http) / total * 100) : 0;
+      document.getElementById('num-prog').textContent = prog.toFixed(1) + '%';
       document.getElementById('seg-p2p').style.width = (p2p / total * 100) + '%';
       document.getElementById('seg-http').style.width = (http / total * 100) + '%';
 
