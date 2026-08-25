@@ -124,10 +124,15 @@
   <!-- 必须先于 pear-player.js 设置 PearConfig，worker.js/reporter.js 在 bundle 加载时读取 -->
   <!-- 后端 API 基础地址：默认同源（本地）。外网部署可用 ?backend=https://bot3.1230sb.com/p2p_mp4 覆盖 -->
   <script>
-    window.PEAR_BACKEND = window.PEAR_BACKEND || new URLSearchParams(location.search).get('backend') || 'https://bot3.1230sb.com/p2p_mp4';
+    // 本地(127.0.0.1/localhost)默认同源后端；外网(GitHub Pages / bot3)默认公网后端
+    var IS_LOCAL = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    window.PEAR_BACKEND = window.PEAR_BACKEND ||
+      new URLSearchParams(location.search).get('backend') ||
+      (IS_LOCAL ? '' : 'https://bot3.1230sb.com/p2p_mp4');
     window.PearConfig = {
       getNodesUrl: window.PEAR_BACKEND + '/v1/customer/nodes',
-      signalWsUrl: 'ws://127.0.0.1:8001/wss',
+      // 信令 WS 仅本地联调用（Fog/DataChannel）；外网 P2P 走 WebTorrent wss tracker 信令，不连本机
+      signalWsUrl: IS_LOCAL ? 'ws://127.0.0.1:8001/wss' : null,
       statdUrl: window.PEAR_BACKEND || location.origin
     };
   </script>
@@ -237,7 +242,7 @@
       var player = new PearPlayer('#pearvideo', {        scheduler: 'IdleFirst',
         autoplay: true,
         interval: 5000,
-        useDataChannel: true,     // 本地 Fog 节点 DataChannel
+        useDataChannel: IS_LOCAL,     // 本地 Fog 节点 DataChannel；外网走 WebTorrent（不连本机 WS）
         dataChannels: 10,
         useTorrent: true,         // 浏览器间 P2P（WebTorrent，走 tracker）
         trackers: playerTrackers,         // tracker 服务器（?tracker= 参数 / API 返回，逗号分隔多地址）

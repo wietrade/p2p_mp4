@@ -60,8 +60,9 @@
   </section>
 
   <script>
-    // 后端 API 基础地址：默认同源（本地）；外网部署用 ?backend=https://bot3.1230sb.com/p2p_mp4
-    window.PEAR_BACKEND = new URLSearchParams(location.search).get('backend') || 'https://bot3.1230sb.com/p2p_mp4'
+    // 后端 API 基础地址：本地默认同源；外网(GitHub Pages/bot3)默认公网后端，可用 ?backend= 覆盖
+    window.PEAR_BACKEND = new URLSearchParams(location.search).get('backend') ||
+      ((location.hostname === '127.0.0.1' || location.hostname === 'localhost') ? '' : 'https://bot3.1230sb.com/p2p_mp4')
     function playerUrl(query) {
       var b = window.PEAR_BACKEND ? 'backend=' + encodeURIComponent(window.PEAR_BACKEND) + '&' : ''
       // 用当前目录相对路径（兼容 GitHub Pages 子目录部署，如 /p2p_mp4/）
