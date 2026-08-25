@@ -22,15 +22,13 @@
     "webtorrent": "^0.98.16"
   },
   "devDependencies": {
+    "browserify": "^17.0.1",
     "copy": "^0.1.2",
     "del": "^2.0.2"
   },
   "scripts": {
     "build-player": "browserify index.player.js -s PearPlayer > ./dist/pear-player.js",
-    "uglify-player": "browserify -s PearPlayer -e  ./index.player.js | babili > ./dist/pear-player.min.js",
-    "pull-from-github": "git pull",
-    "push-to-github": "git add . && git commit -m 'update' && git push",
-    "npm-publish": "npm publish"
+    "deploy": "node scripts/deploy.js"
   },
   "author": "Xie Ting Pear Limited",
   "license": "MIT",

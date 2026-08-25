@@ -1,3 +1,8 @@
 .DS_Store
 .idea
 /node_modules
+**/node_modules
+p2p-server.tgz
+*.log
+# 部署包是独立 git 仓库（deploy/p2p_mp4 单独 push 到 GitHub Pages），主仓库不跟踪
+deploy/

@@ -78,7 +78,7 @@ PearPlayer.prototype.setupListeners = function () {
             // self.normalWindowLength = self._windowLength;
             if (windowLength < 3) {
                 windowLength = 3;
-            } else if (self._windowLength > 15) {
+            } else if (windowLength > 15) {                 //原代码误用 self._windowLength（未定义），高码率视频窗口不被限制，导致 addTorrent 不 select
                 windowLength = 15;
             }
             dispatcher._windowLength = windowLength;

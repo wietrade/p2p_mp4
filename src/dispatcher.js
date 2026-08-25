@@ -127,7 +127,7 @@ Dispatcher.prototype._init = function () {
     }
 
     //初始化buffersources
-    for (var k=0;k<self.bufferSources;++k) {
+    for (var k=0;k<self.bufferSources.length;++k) {
         self.bufferSources[k] = null;
     }
 
@@ -351,7 +351,9 @@ Dispatcher.prototype._calRange = function (index) {            //根据索引计
     var end = (index+1)*self.pieceLength - 1;
     if(index == (self.chunks-1))
     {
-        end = index*self.pieceLength + self.fileSize%self.pieceLength - 1;
+        // 末块：fileSize 非 pieceLength 整数倍时是余数；恰好整除时末块就是整块
+        var mod = self.fileSize % self.pieceLength;
+        end = mod === 0 ? (index+1)*self.pieceLength - 1 : index*self.pieceLength + mod - 1;
     }
     return [begin, end];
 };
@@ -482,7 +484,12 @@ Dispatcher.prototype._setupHttp = function (hd) {
 
             self.store.put(index, buffer);
 
-
+            // 同步到 WebTorrent 的 bitfield：HTTP 下载的数据也能被 WebTorrent 识别并做种
+            // （webtorrent 内部自建 bitfield，与 dispatcher.bitfield 相互独立）
+            if (self.torrent && self.torrent.bitfield) {
+                self.torrent.bitfield.set(index, true);
+                self.torrent._checkDone();
+            }
 
             self._checkDone();
             if (self.useMonitor) {
@@ -534,6 +541,12 @@ Dispatcher.prototype._setupDC = function (jd) {
             self.bitfield.set(index,true);
 
             self.store.put(index, buffer);
+
+            // 同步到 WebTorrent 的 bitfield（DC 下载的数据也可做种）
+            if (self.torrent && self.torrent.bitfield) {
+                self.torrent.bitfield.set(index, true);
+                self.torrent._checkDone();
+            }
 
             self._checkDone();
             if (self.useMonitor) {
@@ -594,10 +607,12 @@ Dispatcher.prototype.addTorrent = function (torrent) {
     this.torrent = torrent;
     torrent.pear_downloaded = 0;
     debug('addTorrent _windowOffset:' + self._windowOffset);
-    if (self._windowOffset + self._windowLength < torrent.pieces.length-1) {
-        debug('torrent.select:%d to %d', self._windowOffset+self._windowLength, torrent.pieces.length-1);
-        torrent.select(self._windowOffset+self._windowLength, torrent.pieces.length-1, 1000);
-    }
+    // 原实现只 select 播放窗口之外的 piece（windowOffset+windowLength .. 末尾），
+    // 窗口内全靠 HTTP/Fog——慢 CDN 场景下开头数据迟迟不到导致播放卡顿。
+    // 改为 select 全部 piece（0..末尾）：store/bitfield 与 HTTP 共享，已下载的块自动去重，
+    // WebTorrent(P2P) 可补下载窗口内未就绪的块，快 P2P 慢 CDN 时显著加快首屏。
+    // torrent.select(self._windowOffset+self._windowLength, torrent.pieces.length-1, 1000);
+    torrent.select(0, torrent.pieces.length-1, 1000);
     torrent.on('piecefromtorrent', function (index) {
 
         debug('piecefromtorrent:'+index);

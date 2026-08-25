@@ -1,0 +1,36 @@
+[
+  {
+    "id": "06e13d6339",
+    "url": "https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4",
+    "rel": null,
+    "localFile": null,
+    "name": "kaltura.mp4",
+    "size": null,
+    "infoHash": "ef9cfc0fa65744edf4cd6cd3256cf805b86c7822",
+    "magnetURI": "magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker",
+    "hasTorrent": true,
+    "metaSource": "local",
+    "trackers": [
+      "wss://bot3.1230sb.com/tracker"
+    ],
+    "torrentUrl": "http://127.0.0.1:8000/boot/kaltura.mp4.torrent",
+    "registeredAt": 1787626778963
+  },
+  {
+    "id": "c4b35e3ba5",
+    "url": "https://bot3.1230sb.com/kaltura-mirror.mp4",
+    "rel": null,
+    "localFile": null,
+    "name": "kaltura.mp4",
+    "size": null,
+    "infoHash": "ef9cfc0fa65744edf4cd6cd3256cf805b86c7822",
+    "magnetURI": "magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker",
+    "hasTorrent": true,
+    "metaSource": "local",
+    "trackers": [
+      "wss://bot3.1230sb.com/tracker"
+    ],
+    "torrentUrl": "http://127.0.0.1:8000/boot/kaltura.mp4.torrent",
+    "registeredAt": 1787627177852
+  }
+]

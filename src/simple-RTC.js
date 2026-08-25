@@ -121,8 +121,8 @@ SimpleRTC.prototype.createPeerConnect = function () {
 
     this.peerConnection.ondatachannel = function (evt) {
         self.dataChannel = evt.channel;
-        debug(this.dataChannel.label+"dc state: "+ self.dataChannel.readyState);
-        self.dataChannelEvents(this.dataChannel);
+        debug(self.dataChannel.label+"dc state: "+ self.dataChannel.readyState);
+        self.dataChannelEvents(self.dataChannel);
     };
 
     this.peerConnection.onicegatheringstatechange = function() {

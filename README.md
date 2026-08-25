@@ -1,121 +1,245 @@
-<h1 align="center">
-  <img src="fig/pear.png" height="110"></img>
-  <br>
-  <a href="https://demo.webrtc.win/player">PearPlayer.js</a>
-  <br>
-  <br>
-</h1>
+# PearPlayer 外链视频 Web 播放方案（HTTP + P2P 双通道）
 
-<h4 align="center">一个支持多协议、多源和混合P2P-CDN的流媒体播放器</h4>
-<p align="center">
-  <a href="https://www.npmjs.com/package/pearplayer"><img src="https://img.shields.io/npm/v/pearplayer.svg?style=flat" alt="npm"></a>
-   <a href="https://www.jsdelivr.com/package/npm/pearplayer"><img src="https://data.jsdelivr.com/v1/package/npm/pearplayer/badge" alt="jsdelivr"></a>
- <a href="https://www.jsdelivr.com/package/npm/pearplayer"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-</p>
-<br>
+给任意 **HTTP 外链视频 + 磁力 hash**，浏览器用户打开一个播放页即可实现 **HTTP 直连 + WebRTC P2P 双通道播放**，下载完自动做种。数据全部在用户端互相分享，服务端只负责注册、生成/托管 `.torrent` 与 tracker 协调。
 
-**[English](https://github.com/PearInc/PearPlayer.js/blob/master/README_EN.md)**
+基于 [PearPlayer.js](https://github.com/PearInc/PearPlayer.js)（MIT）二次开发：修复了 5 个播放器 bug，扩展了「外链 + magnet」次级方案，并自建 Node 后端。
 
-PearPlayer（梨享播放器）**[[Demo](https://demo.webrtc.win/)]** 是完全用JavaScript写的开源HTML5流媒体播放框架，实现了融合HTTP（含HTTPS、HTTP2）和WebRTC的多协议、多源、低延迟、高带宽利用率的无插件Web客户端流媒体加速能力。基于H5的MSE（Media Source Extension）技术将来自多个源节点的Buffer分块喂给播放器，再加上精心设计的算法可实现最优的调度策略及对各种异常情况的处理，PearPlayer由此能在保证用户流畅视频体验的前提下最大化P2P率。
+---
 
-![PearPlayer](fig/PearPlayer.png)
-<br>
-<br>
-![multisources](fig/fogvdn_multisources.png)
+## 一、架构总览
 
-通过`<script>`标签将`pear-player.min.js`导入到HTML即可使用。参考以下[代码示例](#快速开始)，也可查看[`/examples/player-test.html`](/examples/player-test.html)或[get-started](docs/get-started.md)了解使用方法。<br/>
-
-
-## 特性
-
-- P2P能力基于**WebRTC**，无须安装任何插件
-- 多协议(HTTP、HTTPS、WebRTC)、多源
-- 自研的调度算法，在保证用户流畅视频体验的前提下最大化P2P率
-- 默认无需填参数（内部根据视频码率等作自适应），高级使用模式下可自行调整算法和参数
-- 默认不会无限制缓冲，尽可能为CP用户节省带宽/流量
-- 支持Chrome、Firefox、Opera、IE、Edge等主流浏览器，即将支持Safari、腾讯微信、X5/TBS（可多源传输，播放问题待不久后由MSE支持完善）
-- 可选接入低成本、高可用的Pear [Fog CDN](https://github.com/PearInc/FogVDN)
-- 协议默认通过TLS/DTLS全加密，无DPI特征；并可通过Pear Fog组件的动态端口映射进一步消除统计学特征
-- 像使用HTML5 `<video>`标签一样简单，并易与[video.js](https://github.com/videojs/video.js)等流行播放框架集成
-- 具备Browser P2P能力（基于WebTorrent）
-
-![bitmap](fig/bitmap_cn.png)
-
-## 快速开始
-将以下代码拷贝到HTML5代码中，打开网页，见证奇迹的时刻到了！
-```html
-<script src="https://cdn.jsdelivr.net/npm/pearplayer@latest"></script>
-<video id="video" controls></video>
-<script>
-  var player = new PearPlayer('#video', { src: 'https://qq.webrtc.win/tv/Pear-Demo-Yosemite_National_Park.mp4' });
-</script>
+```
+                    ┌─────────────────────────────────────────────┐
+                    │                浏览器（用户端）               │
+                    │  ┌─────────┐   ┌────────────────────────┐   │
+                    │  │ <video> │◄──┤ MSE 多源调度 (PearPlayer)│   │
+                    │  └─────────┘   └──────────┬─────────────┘   │
+                    │                           │                 │
+        HTTP 通道 ──┼── 直连外链 CDN ◄──────────┤                 │
+        P2P 通道  ──┼── WebRTC(WebTorrent) ◄────┘                 │
+                    └───────────┬────────────────────────┬────────┘
+                                │ 节点API/注册/托管       │ announce/peers
+                    ┌───────────▼──────────┐   ┌─────────▼─────────┐
+                    │  后端 Node 服务        │   │  Tracker (wt)     │
+                    │  注册/API/.torrent托管 │   │  peer 发现         │
+                    └───────────────────────┘   └───────────────────┘
 ```
 
-## 使用方法
+- **HTTP 通道**：`<video>` 直连外链 URL（跨域直连，无需媒体代理）
+- **P2P 通道**：WebTorrent（浏览器 WebRTC），走 tracker 发现 peer，用户之间互相传块
+- **服务端不提供视频上行**，只提供几 KB 的 `.torrent` / magnet / 节点信息
 
-### 导入js文件并绑定video标签
-首先通过script标签导入pear-player.min.js：
-```html
-<script src="./dist/pear-player.min.js"></script>
+---
+
+## 二、快速开始（本地）
+
+```powershell
+# 1. 启动后端（HTTP 8000 + WS 8001）
+cd server
+$env:PEAR_FOG_COUNT='0'; node index.js
 ```
-或使用CDN：
-```html
-<script src="https://cdn.jsdelivr.net/npm/pearplayer@latest"></script>
+
+```powershell
+# 2. 打开测试台（推荐入口）
+http://127.0.0.1:8000/test.html
 ```
-假设用video标签播放以下视频，HTML如下：
-```html
-<video id="pearvideo" src="https://qq.webrtc.win/tv/Pear-Demo-Yosemite_National_Park.mp4" controls>
+
+测试台已默认预填 kaltura 大文件（100MB），点「注册 → 播放」即可看到 HTTP + P2P 双通道效果。
+
+或直接打开播放页：
+
 ```
-只需以下几行代码，即可将PearPlayer绑定到video标签：
-```html
-<script>
-  /**
-  * 第一个参数为video标签的id或class
-  * opts是可选的参数配置
-  */
-  if (PearPlayer.isMSESupported()) {
-    var player = new PearPlayer('#pearvideo', opts);
-  }
-</script>
+http://127.0.0.1:8000/?url=<外链>&magnet=<磁力>&torrent=<.torrent地址>&tracker=<tracker服务器>
 ```
-恭喜您，您的播放器已经具备P2P能力了，而且无须任何插件！
 
-### 如何为自己的视频加速？
-示例中的视频是已经分发过的，那么如何为任意视频加速呢？很简单，只需在[视频分发系统](https://oss.webrtc.win/)中添加您的视频URL，即可利用Pear的海量节点为您的视频加速！具体教程请点击[这里](https://manual.webrtc.win/oss/)（目前新注册用户可以免费分发3个大小不超过100MB的MP4或TS格式的文件，视频名字需添加`Pear-Demo`前缀，如`Pear-Demo-movie.mp4`）
+四个参数均可省略，后端会通过 API 补齐（`magnetURI` / `torrentUrl` / `trackers`）。
 
-## 谁在使用我们的产品？
+### 播放器参数（`?` 查询串）
 
-+ [Pear Limited](https://pear.hk)
-+ [Lenovo China](https://www.lenovo.com.cn/)
-+ [FastWeb](http://fastweb.com.cn/)
-+ [UCloud](https://www.ucloud.cn)
-+ [Tencent Cloud](https://qcloud.com)
-+ [Tencent X5/TBS](https://x5.tencent.com/tbs/)
-+ [Tencent APD](http://www.chinaz.com/news/2016/0707/548873.shtml)
+| 参数 | 说明 | 必填 |
+|:--|:--|:--:|
+| `url` | HTTP 视频外链 | ✅ |
+| `magnet` | 磁力链接（btih），P2P 通道 | ⚠️ 无则纯 HTTP |
+| `torrent` | `.torrent` 直链（有则立即引导，无需等 peer 交换 metadata） | 可选 |
+| `tracker` | tracker 服务器，**逗号分隔多地址**（API 返回的 trackers 优先） | 可选 |
 
-## PearPlayer 文档
-- **[阅读get-started文档](docs/get-started.md)**
-- **[阅读API文档](docs/api.md)**
+---
 
-## 致谢
-特别感谢以下项目，为本项目提供了部分灵感以及API设计参考：
+## 三、后端 API
 
-- [WebTorrent](https://github.com/webtorrent/webtorrent)
-- [Peer5](https://www.peer5.com/#)
+| 路由 | 方法 | 作用 |
+|:--|:--|:--|
+| `/v1/videos` | POST | 注册 `{url, magnet?, torrentUrl?, name?}`，返回 `magnetURI/torrentUrl/trackers/hasTorrent/metaSource` |
+| `/v1/videos?url=` | GET | 按 url 查询（已注册直接返回） |
+| `/v1/videos` | GET | 列出全部注册视频 |
+| `/v1/customer/nodes` | GET | 节点 API（PearPlayer 协议）：size + HTTP 节点 + WebTorrent magnet 节点 |
+| `/boot/{name}.torrent` | GET | 托管 `.torrent`（供播放器/引导页下载） |
+| `/v1/stats` | POST/GET | 统计上报 / 聚合（播放页统计面板 API 驱动） |
+| `/proxy/{id}` | GET | 次级方案：回源外链的 HTTP 代理（支持 Range） |
+| `/rtc_config` | GET | WebRTC 配置动态下发（多 STUN/TURN，供播放器启动前拉取） |
+| `/health` | GET | 健康检查（进程守护/监控用，返回已注册数） |
+| `/` `/test.html` `/metadata.html` `/seed.html` | GET | 播放页 / 测试台 / metadata 引导页 / 做种页 |
 
-## 演讲与媒体报道
+### `.torrent` 引导（后端职责核心，可靠性排序）
 
-- `2018.02.07` （36氪） - [「Pear梨享」让雾计算落地，百万边缘节点的背后是提高效率和成本控制](http://36kr.com/p/5118296.html) 
-- `2017.09.01` （未来网络开放社区联盟） - [继云计算之后，雾计算再起 —— 谈谈 P2P CDN](https://mp.weixin.qq.com/s/39dfSA6cTj2eoo-KqsC3AQ) 
-- `2017.08.18` （IT大咖说） - [WebRTC会成主流吗？众包CDN时代到了！](http://mp.weixin.qq.com/s/cx_ljl2sexE0XkgliZfnmQ)
-- `2017.07.11` （OSChina开源中国） - [PearPlayer.js —— 混合P2P-CDN的流媒体播放器](https://www.oschina.net/p/PearPlayerjs)
-- `2017.06.24` （腾讯Web前端大会） - [基于WebRTC的P2P-CDN流媒体加速](http://www.itdks.com/dakalive/detail/2577)
-- `2017.05.17` （南方科技大学） - Edge Computing and Shared Fog Streaming
-- `2017.05.08` （台湾逢甲大学） - A Cooler Fruit Venture: Scaling up a Network from Cloud to Fog with Crowdsourcing
-- `2016.08.17` （香港科技大学） - From Cloud to Fog: Scaling up a Network with Crowdsourcing
+种子文件放在 **GitHub Pages 静态托管**（如 `https://wietrade.github.io/p2p_mp4/torrents/`），服务器注册时从 GitHub **远程下载 → 服务端解析校验**；前端也从 GitHub 外链下载种子（免费、快）。
+
+```
+注册流程（用户只需 url + magnet + 种子地址）：
+POST /v1/videos {url, magnet, torrentUrl}
+  → 服务器按可靠性顺序获取 .torrent：
+     ① 本地已有（torrents/ 缓存）            → metaSource: local
+     ② torrentUrl / 磁力 xs= 直链（GitHub）   → 下载+解析校验 infoHash → metaSource: xs
+     ③ 都没有 → 从 peer 交换 metadata         → metaSource: downloadmeta（best effort）
+  → 解析成功：托管 + 返回 torrentUrl（GitHub 地址）
+```
+
+---
+
+## 四、目录结构
+
+```
+pearplayer/
+├─ server/                       # ← 后端（Node 服务）
+│  ├─ index.js                   # 入口：HTTP 8000 + WS 8001 + 全部路由
+│  ├─ config.js                  # 端口 / 媒体 / tracker / 节点 / PEAR_* 配置
+│  ├─ video-service.js           # 视频注册（url+magnet）、HEAD 拿 size、.torrent 托管/引导
+│  ├─ nodes-api.js               # 节点 API（PearPlayer 协议：magnet/size）
+│  ├─ http-media.js              # 媒体服务 + 回源代理 proxyRequest
+│  ├─ media.js                   # 媒体路径解析（剥 {host:port} 前缀）
+│  ├─ torrent-service.js         # torrent 生成与缓存（有母本时）
+│  ├─ gen-torrent.js             # 命令行生成 .torrent + magnet（7 tracker：wss+udp+http）
+│  ├─ start-43.sh                # 43 生产启动脚本（环境变量固化）
+│  ├─ signaling.js / fog-node.js # Fog 信令（次级方案不需要）
+│  ├─ metadata-node.js           # Node metadata 引导（Node↔浏览器有坑，推荐浏览器引导）
+│  ├─ nginx-pear.conf            # 生产 nginx 反代示例（TLS + /tracker）
+│  ├─ media/                     # 本地母本（可选，无则纯用户端）
+│  ├─ torrents/                  # 托管的 .torrent（/boot/ 提供）
+│  └─ public/                    # 播放器静态页
+├─ src/                          # ← 播放器源码（browserify → dist/pear-player.js）
+│  ├─ worker.js                  # WebTorrent 集成：magnet / .torrent 直链 + uploadspeed
+│  ├─ dispatcher.js              # 多源调度 + bitfield 同步（做种关键）
+│  ├─ simple-RTC.js              # WebRTC 数据通道
+│  ├─ piece-validator.js         # 块校验
+│  ├─ http-downloader.js         # HTTP 下载器
+│  └─ ...                        # 其余播放器数据层文件
+├─ index.player.js               # 播放器入口（window.PearConfig）
+├─ dist/pear-player.js           # 播放器构建产物（npm run build-player）
+├─ scripts/deploy.js             # 部署包同步脚本（npm run deploy → deploy/p2p_mp4）
+└─ docs/principle.md             # 原理整理（最终架构定型，权威版）
+```
+
+### 前端静态页（`server/public/`）
+
+| 页面 | 作用 |
+|:--|:--|
+| `index.html` | 播放页：统计面板 + `?url=&magnet=&torrent=&tracker=` 自动注册/播放 |
+| `test.html` | **功能测试台**：注册 / 引导来源 / 节点 API / iframe 播放 |
+| `metadata.html` | 浏览器端 metadata 引导（无 `.torrent` 时兜底） |
+| `seed.html` | 浏览器做种页（可并入播放页） |
+| `webtorrent.min.js` | WebTorrent 浏览器 bundle |
+
+---
+
+## 五、构建与开发
+
+```powershell
+# 重新构建播放器（改 src/*.js 后必须执行）
+npm run build-player          # → dist/pear-player.js
+```
+
+后端无需构建，直接 `node index.js`。前端页面无需构建（后端静态托管）。
+
+---
+
+## 六、生产部署（公网）
+
+### 实际部署拓扑（已上线）
+
+```
+用户浏览器 ──HTTPS──► https://wietrade.github.io/p2p_mp4/   （前端 GitHub Pages）
+                        │ 跨域调用
+                        ▼
+                https://bot3.1230sb.com/p2p_mp4/           （后端 nginx 反代 → Node :8000）
+                        ├── /p2p_mp4/v1/*  ──► 注册/节点/统计 API
+                        ├── /p2p_mp4/boot/ ──► .torrent 托管
+                        └── /tracker      ──► wt-tracker(:8083) WebSocket
+
+视频数据流（服务端零上行）：
+  HTTP 通道：用户 <video> 直连外链 CDN（如 vodcdn.sg.kaltura.com）
+  P2P 通道：用户 ↔ 用户（WebRTC + tracker 协调）
+```
+
+### 部署清单
+
+| 项 | 地址 | 说明 |
+|:--|:--|:--|
+| 前端（GitHub Pages） | `https://wietrade.github.io/p2p_mp4/` | 仓库 `wietrade/p2p_mp4` main 分支根，部署包在 `deploy/p2p_mp4/` |
+| **种子文件（GitHub）** | `https://wietrade.github.io/p2p_mp4/torrents/` | `.torrent` 静态托管，服务器注册时远程下载解析 |
+| 后端 API | `https://bot3.1230sb.com/p2p_mp4/` | nginx `location ^~ /p2p_mp4/` 反代 → `127.0.0.1:8000` |
+| Tracker | `wss://bot3.1230sb.com/tracker` | wt-tracker docker :8083 |
+
+### 部署注意
+
+1. **前端页面必须用相对路径**（`./pear-player.js`、`./?`），兼容 GitHub Pages 子目录
+2. 后端启动环境变量：`PEAR_FOG_COUNT=0`（无 Fog）、`PEAR_NO_NODES=1`（零 HTTP 节点）、`PEAR_PUBLIC_BASE=https://bot3.1230sb.com/p2p_mp4`（API 公网）、`PEAR_TORRENT_BASE=https://wietrade.github.io/p2p_mp4/torrents`（种子 GitHub 地址）
+3. nginx 反代用 `location ^~ /p2p_mp4/`（`^~` 避免被 `.js` 正则 location 抢走）
+4. 后端 CORS：`/v1/*`、`/boot/`、媒体均已 `Access-Control-Allow-Origin: *`
+5. 视频**不存服务器**：注册时只需 url + magnet，`.torrent` 由服务器托管（几 KB）；HTTP 通道用户直连外链 CDN
+6. 服务端职责最小化：注册、`.torrent`、tracker；**零视频上行**
+7. **多 tracker 并行**：自建 + `wss://tracker.openwebtorrent.com`（浏览器 P2P）；种子另带 `udp://` `http://` 公共 tracker（**兼容 uTorrent 等传统客户端**，它们不支持 wss）
+8. **rtc_config 动态下发**：多 STUN（google/twilio/cloudflare），可选 TURN（`PEAR_TURN_URL/USER/CRED`）
+9. **进程守护**：`server/start-43.sh` + systemd/pm2（`Restart=always`），健康检查 `/health`
+10. 前端页面按 hostname 自适应：本地开 DataChannel，外网关（P2P 走 WebTorrent wss 信令）
+
+---
+
+## 七、实测验证（浏览器）
+
+| 测试 | 视频 | 结果 |
+|:--|:--|:--|
+| 多用户 P2P（kaltura 外链） | 100MB | P2P 94.8%（182/192 块） |
+| 次级方案（bbb + magnet） | 30MB | P2P 96.8%（60/62 块） |
+| 纯用户端 P2P（无 seed 页面） | 100MB | 用户 1 做种 → 用户 2 P2P 95.8% |
+| 参数全链路（url+magnet+torrent+tracker） | 100MB | P2P 97.4%（184/189 块） |
+| **外网端到端（GitHub Pages + 43 后端）** | 100MB | P2P 94.9%（75/79 块），HTTP 直连 CDN（mac=vodcdn） |
+
+---
+
+## 架构定型（最终方案）
+
+**浏览器 WebRTC 互传 + CDN 兜底 + wss tracker 发现 + 种子带完整公共 tracker（兼容 uTorrent）+ 服务端零上行。**
+
+- 不引入 Node 数据桥 / 用户贡献节点（服务器不可承受流量 / 用户无法运行 Node）
+- Fog / 信令 WS 仅本地联调（外网 `useDataChannel=false`）
+- 数据全在用户端流动，服务端只出 KB 级元数据
+- 权威原理文档：`docs/principle.md`
+
+---
+
+## 八、关键修复（相对上游）
+
+1. `ondatachannel` 的 `this` → `self`；SDP `a=mid` 提取；`windowLength` 误用
+2. 硬编码后端地址 → `window.PearConfig`（worker/reporter 可配）
+3. WebTorrent 0.98 默认 STUN 无效 → `tracker.rtcConfig`
+4. **bitfield 同步**：HTTP 下载后同步到 `torrent.bitfield`，否则下载完不做种
+5. **纯 magnet 方案**：validator 从 `torrent.torrentFile` 创建；新增 `.torrent` 直链引导（`torrentUrl`）
+6. 后端 `listVideos()` 补 `hasTorrent/metaSource` 字段
+
+### 安全与边界（2026-08-25 线上验证）
+
+| 项 | 修复 |
+|:--|:--|
+| SSRF | 注册校验内网 + `/proxy` 转发前二次校验（`isPrivateHost`） |
+| HTTP 状态码 | `http-downloader` `\|\|` → `&&` + Content-Range 空保护 |
+| 路径穿越 | 种子 `parsed.name` → `sanitize` 去 `..` |
+| 磁盘打满 | 下载大小上限 `maxDownloadBytes`（默认 2GB） |
+| 末块边界 | `_calRange` 整除分支（文件为 pieceLength 整数倍） |
+| 外网信令 | hostname 自适应 + `useDataChannel=false`（不再连本机 WS） |
+| 统计桩 | reporter 死代码 + axios 移除 |
+
+---
 
 ## License
 
-MIT. Copyright (c) [Pear Limited](https://pear.hk) 
-## 帮助与支持
-E-mail: <service@pear.hk>；用户QQ群：`373594967`；[CP/CDN接入、OEM与其他商务合作](https://github.com/PearInc/FogVDN)
+MIT. 播放器部分 Copyright (c) [Pear Limited](https://pear.hk)；本方案为二次开发。

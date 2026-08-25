@@ -1,118 +1,153 @@
-<h1 align="center">
+# PearPlayer External-Video Web Player (HTTP + P2P dual-channel)
 
-<img src="fig/pear.png" height="110"></img>
-  <br>
-  <a href="https://demo.webrtc.win/player">PearPlayer.js</a>  <br>
-  <br>
-</h1>
-<h4 align="center">A multi-protocol, multi-source and hybrid P2P-CDN streaming media player</h4>
-<p align="center">
-.  <a href="https://www.npmjs.com/package/pearplayer"><img src="https://img.shields.io/npm/v/pearplayer.svg?style=flat" alt="npm"></a>
-   <a href="https://www.jsdelivr.com/package/npm/pearplayer"><img src="https://data.jsdelivr.com/v1/package/npm/pearplayer/badge" alt="jsdelivr"></a>
- <a href="https://www.jsdelivr.com/package/npm/pearplayer"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-</p>
-<br>
+Give any **HTTP video URL + magnet hash**, and a browser user opens one page to play via **HTTP direct + WebRTC P2P dual channels**, auto-seeding after download. All data is shared between user clients; the server only registers videos, generates/hosts `.torrent` files, and coordinates the tracker.
 
-**[English](https://github.com/PearInc/PearPlayer.js/blob/master/README_EN.md)**
+A second development based on [PearPlayer.js](https://github.com/PearInc/PearPlayer.js) (MIT): fixed 5 player bugs, added the "external URL + magnet" secondary scheme, and a self-built Node backend.
 
-PearPlayer (梨享播放器) **[[Demo](https://demo.webrtc.win/)]** is a streaming media player framework written completely with HTML5 and JavaScript. Combining HTTP (including HTTPS, HTTP2) and WebRTC, PearPlayer accelerates media streaming on the Web. It supports multiple protocols, multiple sources, and achieves low latency and high bandwidth utilization. With the help of H5 MSE (Media Source Extension) technology, it receives buffers from multiple source nodes and delivers to the player. Finely designed algorithms are adopted to achieve the best scheduling effect and to handle abnormal situations. Thus, PearPlayer can provide end-users with wonderful video watching experience while maximizing the P2P ratio at the same time.
+---
 
-![PearPlayer](fig/PearPlayer.png)<br>
-<br>
-![multisources](fig/fogvdn_multisources.png)
+## Architecture
 
-Simply import `pear-player.min.js` to HTML via the `<script>` tag. Refer to [code examples](#quick-start) below, or consult [`/examples/player-test.html`](/examples/player-test.html) or [get-started](docs/get-started.md) for usages.<br/> 
-
-
-## Features
-- Plugin-free thanks to the P2P ability based on **WebRTC**
-- Multi-protocol (HTTP, HTTPS, WebRTC) and multi-source
--	Customized algorithms that provide users with wonderful video watching experience while maximizing the P2P ratio at the same time.
--	Parameter-free by default (dynamic adaptive internally according to bitrate, etc.). Clients can fill in their preferred parameters in advanced mode.
--	Buffers are limited to save bandwidth/traffic for CP users.
--	Support Chrome, Firefox, Opera, IE, Edge and other mainstream browsers; will support Safari, Tencent WeChat and X5/TBS (multi-source transmission is enabled; media playback issues will be well resolved when MSE is supported)
--	Optional access to low cost, high availability Pear [Fog CDN](https://github.com/PearInc/FogCDN)
--	Fully encrypted via TLS/DTLS by default, no DPI features; statistical characteristics can be further eliminated using dynamic port mapping of Pear Fog Suite.
--	As easy as using HTML5 `<video>` tag; easy to integrate with popular player frameworks like [video.js](https://github.com/videojs/video.js)
-- With Browser-to-Browser P2P ability (based on WebTorrent)
-
-![bitmap](fig/bitmap_en.png)
-
-## Quick Start
-Please copy the following codes into Web HTML5 code, and then open the webpage. Now, it's time to witness the miracle.
-
-```html<script src="https://cdn.jsdelivr.net/npm/pearplayer@latest"></script>
-<video id="video" controls></video>
-<script>
-  var player = new PearPlayer('#video', { src: 'https://qq.webrtc.win/tv/Pear-Demo-Yosemite_National_Park.mp4' });
-</script>
+```
+                    ┌─────────────────────────────────────────────┐
+                    │                Browser (client)             │
+                    │  ┌─────────┐   ┌────────────────────────┐   │
+                    │  │ <video> │◄──┤ MSE multi-source player │   │
+                    │  └─────────┘   └──────────┬─────────────┘   │
+                    │                           │                 │
+        HTTP path ──┼── direct external CDN ◄───┤                 │
+        P2P path  ──┼── WebRTC (WebTorrent) ◄───┘                 │
+                    └───────────┬────────────────────────┬────────┘
+                                │ register/API/torrent   │ announce/peers
+                    ┌───────────▼──────────┐   ┌─────────▼─────────┐
+                    │  Node backend        │   │  Tracker (wt)     │
+                    │  register/API/host   │   │  peer discovery   │
+                    └───────────────────────┘   └───────────────────┘
 ```
 
-## Usages
-###  Import js file and bind to video tag
-First import the <script> tag to pear-player.min.js:
-```html
-<script src="./dist/pear-player.min.js"></script>
+- **HTTP path**: `<video>` connects the external URL directly (cross-origin, no media proxy)
+- **P2P path**: WebTorrent (browser WebRTC), peers discovered via tracker, blocks shared between users
+- **The server never uploads video data**, only a few KB of `.torrent` / magnet / node info
+
+---
+
+## Quick Start (local)
+
+```powershell
+cd server
+$env:PEAR_FOG_COUNT='0'; node index.js
 ```
-or use CDN:
-```html
-<script src="https://cdn.jsdelivr.net/npm/pearplayer@latest"></script>
+
+Open the test bench (recommended entry):
+
 ```
-If use video tag to play the following video, HTML is like below:
-```html
-<video id="pearvideo" src="https://qq.webrtc.win/tv/Pear-Demo-Yosemite_National_Park.mp4" controls>
+http://127.0.0.1:8000/test.html
 ```
-PearPlayer can be bound to the video tag using only the codes below:
-```html
-<script>
-  /**
-  * The first parameter is ID or CLASS of the video tag
-  * Opts means the optional parameter configurations
-  */
-  if (PearPlayer.isMSESupported()) {
-    var player = new PearPlayer('#pearvideo', opts);
-  }
-</script>
+
+It is pre-filled with the kaltura 100MB video by default — click "Register → Play" to see HTTP + P2P working together.
+
+Or open the player page directly:
+
 ```
-Congratulations! NOW your player has P2P ability and no plug-ins!
+http://127.0.0.1:8000/?url=<external>&magnet=<magnet>&torrent=<.torrent URL>&tracker=<tracker server>
+```
 
-### How to accelerate your videos?
-The video above has already been dispatched. So how to speed up other videos? Just add your video URL into [Pear Fog Content Delivery Operating System](https://oss.webrtc.win/). And then you can feel free to use Pear's massive fog nodes to accelerate your videos! Please click [here](https://manual.webrtc.win/oss/) for detailed guide. (Currently, newly-registered users can distribute three `MP4`/TS files, each under 100MB, free of charge. Prefix `Pear-Demo-` prefix needs to be added in front of the video file name, such as `Pear-Demo-movie.mp4`)
+All four params are optional; the backend fills them in via API (`magnetURI` / `torrentUrl` / `trackers`).
 
-## Who's using PearPlayer today？
+### Player params (`?` query string)
 
-+ [Pear Limited](https://pear.hk)
-+ [Lenovo China](https://www.lenovo.com.cn/)
-+ [FastWeb](http://fastweb.com.cn/)
-+ [UCloud](https://www.ucloud.cn)
-+ [Tencent Cloud](https://qcloud.com)
-+ [Tencent X5/TBS](https://x5.tencent.com/tbs/)
-+ [Tencent APD](http://www.chinaz.com/news/2016/0707/548873.shtml)
+| Param | Description | Required |
+|:--|:--|:--:|
+| `url` | HTTP video URL | ✅ |
+| `magnet` | magnet link (btih), P2P channel | ⚠️ else HTTP-only |
+| `torrent` | `.torrent` direct URL (instant bootstrap, no metadata exchange wait) | optional |
+| `tracker` | tracker server, **comma-separated for multiple** (API `trackers` takes priority) | optional |
 
-## PearPlayer Documents
-- **[get-started ](docs/get-started.md)**
-- **[API](docs/api.md)**
+---
 
-## Acknowledgement
-Special thanks goes to the following projects that provide some inspirations and API design references:
+## Backend API
 
-- [WebTorrent](https://github.com/webtorrent/webtorrent)
-- [Peer5](https://www.peer5.com/#)
+| Route | Method | Purpose |
+|:--|:--|:--|
+| `/v1/videos` | POST | register `{url, magnet?, torrentUrl?, name?}`, returns `magnetURI/torrentUrl/trackers/hasTorrent/metaSource` |
+| `/v1/videos?url=` | GET | query by url |
+| `/v1/videos` | GET | list all registered videos |
+| `/v1/customer/nodes` | GET | node API (PearPlayer protocol): size + HTTP node + WebTorrent magnet node |
+| `/boot/{name}.torrent` | GET | hosted `.torrent` for players / bootstrap pages |
+| `/v1/stats` | POST/GET | stats report / aggregate (API-driven panel) |
+| `/proxy/{id}` | GET | secondary scheme: origin-fetch HTTP proxy (Range supported) |
+| `/` `/test.html` `/metadata.html` `/seed.html` | GET | player / test bench / metadata bootstrap / seed page |
 
-## Speech and Media Reports
+### `.torrent` bootstrap (reliability order)
 
-- Feb 7th, 2018 (36Kr) - [「Pear Share」practises fog computing, behind millions of fringe nodes are efficiency promotion and cost control](http://36kr.com/p/5118.html) 
-- Sep 1st, 2017 (Future Network and Open Community Alliance) - [Fog Computing rises after Cloud Computing - Have a discuss on P2P-CDN](https://mp.weixin.qq.com/s/39dfSA6cTj2eoo-KqsC3AQ) 
-- Aug 18th, 2017 (IT Biggie Talks) - [Will WebRTC be the mainstream? Here comes the era of CDN crowdsourcing!](http://mp.weixin.qq.com/s/cx_ljl2sexE0XkgliZfnmQ)
-- Jul 11st, 2017 (OSChina) - [PearPlayer.js - A streaming media player supports Mixed P2P-CDN](https://www.oschina.net/p/PearPlayerjs)
-- Jun 24th, 2017 (Tencent Frontend Conference) - [P2P-CDN streaming media acceleration based on WebRTC](http://www.itdks.com/dakalive/detail/2577)
-- May 17th, 2017 (Southern University of Science and Technology) - Edge Computing and Shared Fog Streaming
-- May 8th, 2017 (Feng Chia University) - A Cooler Fruit Venture: Scaling up a Network from Cloud to Fog with Crowdsourcing
-- Aug 17th, 2016 (Hong Kong University of Science and Technology) - From Cloud to Fog: Scaling up a Network with Crowdsourcing
+```
+① local .torrent (torrents/)                    → metaSource: local
+② magnet xs= link or registered torrentUrl      → download + verify infoHash → metaSource: xs
+③ otherwise → fetch metadata from peers         → metaSource: downloadmeta (best effort)
+   on success, host to torrents/ → /boot/{name}.torrent available
+```
+
+---
+
+## Directory
+
+```
+pearplayer/
+├─ server/                       # ← backend (Node)
+│  ├─ index.js                   # entry: HTTP 8000 + WS 8001 + routes
+│  ├─ config.js                  # ports / media / tracker / nodes / PEAR_* config
+│  ├─ video-service.js           # video register (url+magnet), HEAD size, .torrent host/bootstrap
+│  ├─ nodes-api.js               # node API (magnet/size)
+│  ├─ http-media.js              # media service + origin proxy proxyRequest
+│  ├─ media.js                   # media path resolution (strip {host:port})
+│  ├─ torrent-service.js         # torrent generate/cache (when source exists)
+│  ├─ gen-torrent.js             # CLI to generate .torrent + magnet
+│  ├─ signaling.js / fog-node.js # Fog signaling (not needed for secondary scheme)
+│  ├─ metadata-node.js           # Node metadata bootstrap (Node↔browser caveat; prefer browser)
+│  ├─ nginx-pear.conf            # production nginx reverse proxy sample (TLS + /tracker)
+│  ├─ media/  torrents/  public/ # local sources / hosted .torrents / static pages
+├─ src/                          # ← player source (browserify → dist/pear-player.js)
+│  ├─ worker.js                  # WebTorrent: magnet / .torrent URL + uploadspeed
+│  ├─ dispatcher.js              # multi-source scheduling + bitfield sync (seeding key)
+│  ├─ simple-RTC.js / piece-validator.js / http-downloader.js ...
+├─ index.player.js               # player entry (window.PearConfig)
+├─ dist/pear-player.js           # built bundle (npm run build-player)
+└─ docs/web-p2p-solution.md      # full solution doc (frontend/backend/sequence/reliability/tests)
+```
+
+### Static pages (`server/public/`)
+
+| Page | Purpose |
+|:--|:--|
+| `index.html` | player: stats panel + `?url=&magnet=&torrent=&tracker=` auto-register/play |
+| `test.html` | **test bench**: register / bootstrap source / node API / iframe play |
+| `metadata.html` | browser metadata bootstrap (fallback when no `.torrent`) |
+| `seed.html` | browser seeding page (can be merged into player) |
+| `webtorrent.min.js` | WebTorrent browser bundle |
+
+---
+
+## Build
+
+```powershell
+npm run build-player          # rebuild player after editing src/*.js → dist/pear-player.js
+```
+
+Backend needs no build, run `node index.js` directly.
+
+---
+
+## Measured Results (browser)
+
+| Test | Video | Result |
+|:--|:--|:--|
+| Multi-user P2P (kaltura external) | 100MB | P2P 94.8% (182/192 blocks) |
+| Secondary scheme (bbb + magnet) | 30MB | P2P 96.8% (60/62 blocks) |
+| Pure user-side P2P (no seed page) | 100MB | user 1 seeds → user 2 P2P 95.8% |
+| Full params (url+magnet+torrent+tracker) | 100MB | P2P 97.4% (184/189 blocks) |
+
+---
 
 ## License
 
-MIT. Copyright (c) [Pear Limited](https://pear.hk) and [snowinszu](https://github.com/snowinszu).
-
-## Help and Support
-E-mail: <service@pear.hk>; User QQ group:`373594967`; [CP/CDN, OEM and other business cooperations](https://github.com/PearInc/FogCDN)
+MIT. Player part Copyright (c) [Pear Limited](https://pear.hk); this solution is a second development.

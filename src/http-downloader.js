@@ -90,7 +90,7 @@ HttpDownloader.prototype._getChunk = function (begin,end) {
     // debug('request range: ' + range);
     xhr.setRequestHeader("Range", range);
     xhr.onload = function (event) {
-        if (this.status >= 200 || this.status < 300) {
+        if (this.status >= 200 && this.status < 300) {
             self.downloading = false;
 
             self.endTime = (new Date()).getTime();
@@ -107,7 +107,12 @@ HttpDownloader.prototype._getChunk = function (begin,end) {
                     self._getChunk(pair[0], pair[1]);
                 }
             }
-            var range = this.getResponseHeader("Content-Range").split(" ",2)[1].split('/',1)[0];
+            var cr = this.getResponseHeader("Content-Range");
+            if (!cr) {                                   // 非 206 响应无 Content-Range，按失败处理
+                self.emit('error');
+                return;
+            }
+            var range = cr.split(" ",2)[1].split('/',1)[0];
             // debug('xhr.onload range:'+range);
             // self.emit('done');
             self._handleChunk(range,this.response);

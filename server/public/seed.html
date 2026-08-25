@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>WebTorrent Seed</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; background: #1e1e1e; color: #ccc; margin: 24px; }
+    .ok { color: #7ee787; } .err { color: #ff7b72; }
+    pre { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h3>WebTorrent Seed（为 kaltura.mp4 做种）</h3>
+  <pre id="log"></pre>
+  <div id="status" style="font-size:13px;margin-bottom:8px;color:#9cdcfe;"></div>
+
+  <!-- 本地构建的 webtorrent 浏览器 bundle -->
+  <script src="./webtorrent.min.js"></script>
+  <script>
+    function log(msg, cls) {
+      var pre = document.getElementById('log');
+      pre.innerHTML += '<div class="' + (cls || '') + '">[' + new Date().toLocaleTimeString() + '] ' + msg + '</div>';
+      // 限制日志行数，避免 DOM 爆炸（每 16KB 触发一次事件，会刷屏）
+      while (pre.children.length > 300) pre.removeChild(pre.firstChild);
+    }
+
+    var TRACKER = 'wss://bot3.1230sb.com/tracker';
+    // 方案B：不预下载，用 web seed（url-list）从外链边拉边做种
+    var MAGNET = 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker';
+    var WEB_SEED_URL = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4';
+    var INFO_HASH = 'ef9cfc0fa65744edf4cd6cd3256cf805b86c7822';
+
+    function start() {
+      log('创建 WebTorrent 客户端...');
+      // 覆盖 webtorrent 0.98 的无效 STUN（新版 Chrome 不认带 ?transport 的 URL）。
+      // 注意：正确 API 是 tracker.rtcConfig（opts.rtcConfig 是 deprecated 兼容写法，不生效）
+      var client = new WebTorrent({
+        tracker: {
+          rtcConfig: {
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:global.stun.twilio.com:3478', 'stun:stun.cloudflare.com:3478'] }]
+          }
+        }
+      });
+
+      log('加载磁力（web seed: 从外链边拉边做种，不预下载）...');
+      client.add(MAGNET, {
+        announce: [TRACKER],
+        urlList: [WEB_SEED_URL]
+      }, function (torrent) {
+        log('✅ 已加载 torrent! infoHash=' + torrent.infoHash, 'ok');
+        log('  pieces=' + torrent.pieces.length + '，等待从外链拉取', 'ok');
+        if (torrent.infoHash !== INFO_HASH) {
+          log('⚠️ infoHash 与预期不符: 预期 ' + INFO_HASH + ' 实际 ' + torrent.infoHash, 'err');
+        }
+        // 主动 select 全部 piece：从外链(web seed)拉取，边下边向其他 peer 做种
+        torrent.select(0, torrent.pieces.length - 1, false);
+
+        // 上行/下行日志节流：每 2 秒最多一条（避免每 16KB 刷一条导致 DOM 爆炸）
+        var lastUp = 0, lastDown = 0;
+        torrent.on('wire', function (wire, addr) {
+          log('新 peer 连接: ' + (addr || wire.remoteAddress || '?'));
+        });
+        torrent.on('download', function (bytes) {
+          if (Date.now() - lastDown > 2000) { log('下行: ' + (bytes / 1024).toFixed(0) + 'KB'); lastDown = Date.now(); }
+        });
+        torrent.on('upload', function (bytes) {
+          if (Date.now() - lastUp > 2000) { log('上行: ' + (bytes / 1024).toFixed(0) + 'KB'); lastUp = Date.now(); }
+        });
+        torrent.on('done', function () {
+          log('✅ 完整文件已从外链拉完，继续做种', 'ok');
+        });
+
+        // 定期显示状态：进度 + peer 数
+        var lastPeers = -1;
+        setInterval(function () {
+          var peers = torrent.numPeers;
+          var prog = torrent.progress;
+          var st = document.getElementById('status');
+          if (st) {
+            st.textContent = '📦 做种进度: ' + (prog * 100).toFixed(1) + '%  |  👥 当前 peers: ' + peers +
+              '  |  ⬆ 已上传: ' + (torrent.uploaded / 1024 / 1024).toFixed(1) + 'MB';
+          }
+        }, 3000);
+      });
+
+      client.on('error', function (e) { log('client error: ' + e.message, 'err'); });
+    }
+
+    start();
+  </script>
+</body>
+</html>

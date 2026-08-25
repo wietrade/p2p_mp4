@@ -1,0 +1,18 @@
+{
+  "name": "pearplayer-local-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PearPlayer.js 本地简易后端：HTTP 多源节点 + 节点发现 API + torrent 服务 + WebSocket 信令",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@roamhq/wrtc": "^0.10.0",
+    "create-torrent": "^3.29.2",
+    "node-datachannel": "^0.33.1",
+    "parse-torrent-file": "^4.2.2",
+    "webtorrent": "^0.98.16",
+    "ws": "^8.18.0"
+  }
+}

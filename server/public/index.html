@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PearPlayer 本地联调页</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; background: #1e1e1e; color: #ccc; }
+    video { width: 720px; max-width: 100%; background: #000; display: block; }
+    #log { margin-top: 16px; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+    .ok { color: #7ee787; } .warn { color: #e3b341; } .err { color: #ff7b72; }
+    /* ===== 统计面板（新设计：速度区 + 块区分开，API 驱动） ===== */
+    #stats { margin-top: 16px; width: 720px; max-width: 100%; box-sizing: border-box; }
+    #stats h4 { margin: 0 0 12px; font-size: 15px; color: #e6edf3; display: flex; align-items: center; gap: 8px; }
+    #stat-user { color: #79c0ff; font-weight: normal; font-size: 13px; }
+
+    /* 速度卡片区 */
+    .speed-cards { display: flex; gap: 10px; margin-bottom: 12px; }
+    .speed-card {
+      flex: 1; background: linear-gradient(160deg, #1c2333 0%, #151a26 100%);
+      border: 1px solid #2d333b; border-radius: 14px; padding: 12px 10px; text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+    .speed-card .spd-icon { font-size: 18px; }
+    .speed-card .spd-label { font-size: 11px; color: #8b949e; margin-top: 2px; }
+    .speed-card .spd-value { font-size: 26px; font-weight: 700; font-family: Consolas, monospace; margin-top: 2px; line-height: 1.1; }
+    .speed-card .spd-unit { font-size: 11px; color: #8b949e; }
+    .speed-card.http .spd-value { color: #e3b341; }
+    .speed-card.p2p-dl .spd-value { color: #7ee787; }
+    .speed-card.p2p-up .spd-value { color: #79c0ff; }
+    .speed-card.online .spd-value { color: #f778ba; }
+
+    /* 块统计卡片区 */
+    .blocks-card { background: #1c2333; border: 1px solid #2d333b; border-radius: 14px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+    .blocks-card .b-title { font-size: 13px; color: #e6edf3; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    .blocks-card .b-title span:last-child { color: #7ee787; font-size: 12px; }
+    .prog-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .prog-row .bar { flex: 1; height: 10px; background: #0d1117; border-radius: 5px; overflow: hidden; }
+    .prog-row .bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #0969da, #58a6ff); border-radius: 5px; transition: width .4s; }
+    .prog-row span { font-family: Consolas, monospace; font-size: 13px; color: #58a6ff; min-width: 52px; text-align: right; }
+    .block-grid { display: flex; gap: 10px; margin-bottom: 12px; }
+    .block-item { flex: 1; background: #161b26; border-radius: 10px; padding: 10px; text-align: center; }
+    .block-item .b-num { font-size: 22px; font-weight: 700; font-family: Consolas, monospace; }
+    .block-item .b-label { font-size: 11px; color: #8b949e; margin-top: 2px; }
+    .block-item.p2p .b-num { color: #7ee787; }
+    .block-item.http .b-num { color: #e3b341; }
+    .block-item.ratio .b-num { color: #58a6ff; }
+    .stacked-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #0d1117; }
+    .stacked-bar .seg-p2p { width: 0%; background: linear-gradient(90deg, #2ea043, #7ee787); transition: width .4s; }
+    .stacked-bar .seg-http { width: 0%; background: linear-gradient(90deg, #b35900, #e3b341); transition: width .4s; }
+    /* 调试日志标题 */
+    #log-title { margin-top: 16px; font-size: 14px; color: #fff; }
+    #log { background: #252526; border: 1px solid #3a3d41; border-radius: 8px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <h3>PearPlayer 本地后端联调（HTTP 多源模式）</h3>
+  <!-- 媒体文件：默认 Kaltura 外链；?url=xxx 时由 JS 动态注册并设置本地代理源 -->
+  <video id="pearvideo" controls autoplay></video>
+
+  <!-- P2P 统计面板（视频下方，速度区 + 块区分开，数据走 /v1/stats API） -->
+  <div id="stats">
+    <h4>📊 P2P 加速统计（实时） <span id="stat-user"></span></h4>
+
+    <!-- ① 速度区：4 张独立卡片（HTTP 下载 / P2P 下载 / P2P 上传 / 在线） -->
+    <div class="speed-cards">
+      <div class="speed-card http">
+        <div class="spd-icon">⬇️</div>
+        <div class="spd-label">HTTP 下载</div>
+        <div class="spd-value" id="spd-http">0</div>
+        <div class="spd-unit" id="unit-http">KB/s</div>
+      </div>
+      <div class="speed-card p2p-dl">
+        <div class="spd-icon">⬇️</div>
+        <div class="spd-label">P2P 下载</div>
+        <div class="spd-value" id="spd-p2p-dl">0</div>
+        <div class="spd-unit" id="unit-p2p-dl">KB/s</div>
+      </div>
+      <div class="speed-card p2p-up">
+        <div class="spd-icon">⬆️</div>
+        <div class="spd-label">P2P 上传</div>
+        <div class="spd-value" id="spd-p2p-up">0</div>
+        <div class="spd-unit" id="unit-p2p-up">KB/s</div>
+      </div>
+      <div class="speed-card online">
+        <div class="spd-icon">👥</div>
+        <div class="spd-label">在线用户</div>
+        <div class="spd-value" id="users-online">--</div>
+        <div class="spd-unit">人</div>
+      </div>
+    </div>
+
+    <!-- ② 块统计区：进度 + 三格块数 + 堆叠条 -->
+    <div class="blocks-card">
+      <div class="b-title">📦 块统计</div>
+      <div class="prog-row">
+        <div class="bar"><div id="bar-prog" class="fill"></div></div>
+        <span id="num-prog">0.0%</span>
+      </div>
+      <div class="block-grid">
+        <div class="block-item p2p">
+          <div class="b-num" id="num-p2p">0</div>
+          <div class="b-label">🟢 P2P 互传块</div>
+        </div>
+        <div class="block-item http">
+          <div class="b-num" id="num-http">0</div>
+          <div class="b-label">🟡 HTTP 回源块</div>
+        </div>
+        <div class="block-item ratio">
+          <div class="b-num" id="num-ratio">0%</div>
+          <div class="b-label">P2P 占比</div>
+        </div>
+      </div>
+      <div class="stacked-bar">
+        <div class="seg-p2p" id="seg-p2p"></div>
+        <div class="seg-http" id="seg-http"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="log-title">🐞 调试日志</div>
+  <div id="log"></div>
+
+  <!-- 必须先于 pear-player.js 设置 PearConfig，worker.js/reporter.js 在 bundle 加载时读取 -->
+  <!-- 后端 API 基础地址：默认同源（本地）。外网部署可用 ?backend=https://bot3.1230sb.com/p2p_mp4 覆盖 -->
+  <script>
+    // 本地(127.0.0.1/localhost)默认同源后端；外网(GitHub Pages / bot3)默认公网后端
+    var IS_LOCAL = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    window.PEAR_BACKEND = window.PEAR_BACKEND ||
+      new URLSearchParams(location.search).get('backend') ||
+      (IS_LOCAL ? '' : 'https://bot3.1230sb.com/p2p_mp4');
+    window.PearConfig = {
+      getNodesUrl: window.PEAR_BACKEND + '/v1/customer/nodes',
+      // 信令 WS 仅本地联调用（Fog/DataChannel）；外网 P2P 走 WebTorrent wss tracker 信令，不连本机
+      signalWsUrl: IS_LOCAL ? 'ws://127.0.0.1:8001/wss' : null,
+      statdUrl: window.PEAR_BACKEND || location.origin
+    };
+  </script>
+
+  <!-- 动态拉取 WebRTC rtcConfig（多 STUN/TURN，模仿 instant.io /__rtcConfig__）；失败用播放器内置默认。
+       worker 在 _startPlaying 时才读取（晚于本请求），故通常已就绪；即使未就绪也有内置多 STUN 兜底 -->
+  <script>
+    fetch(window.PEAR_BACKEND + '/rtc_config')
+      .then(function (r) { return r.json() })
+      .then(function (d) {
+        if (d && d.rtcConfig && d.rtcConfig.iceServers && d.rtcConfig.iceServers.length) {
+          window.PearConfig.rtcConfig = d.rtcConfig;
+        }
+      })
+      .catch(function () {});
+  </script>
+
+  <!-- 加载重新构建的播放器（已支持 window.PearConfig 覆盖后端地址 + rtcConfig 动态下发）；相对路径兼容 GitHub Pages 子目录 -->
+  <script src="./pear-player.js"></script>
+  <script>
+    function log(msg, cls) {
+      var div = document.getElementById('log');
+      var line = document.createElement('div');
+      line.className = cls || '';
+      line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      div.appendChild(line);
+      div.scrollTop = div.scrollHeight;
+    }
+
+    // ===== 统计面板（API 方式：POST /v1/stats 上报 → 后端聚合 → GET 轮询渲染） =====
+    // 每个页面唯一 id（避免多页面 url 相同 → id 相同 → stats 互相覆盖）
+    var me = new URLSearchParams(location.search).get('user') || ('u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    document.getElementById('stat-user').textContent = '（用户 ' + me + '）';
+
+    // 本页状态（播放器事件 → myState → POST 上报）
+    var myState = { user: me, httpBlocks: 0, p2pBlocks: 0, httpSpeed: 0, p2pDlSpeed: 0, p2pUpSpeed: 0, progress: 0, totalChunks: 0, p2pBytes: 0, httpBytes: 0 };
+
+    // 速度滑动窗口（3 秒）
+    var speedLog = { HTTP: [], P2P: [] };
+    var uploadKBs = 0;
+
+    function recordSpeed(type, bytes) {
+      var now = Date.now();
+      speedLog[type].push({ t: now, bytes: bytes });
+      while (speedLog[type].length && speedLog[type][0].t < now - 3000) speedLog[type].shift();
+    }
+
+    function fmtSpeed(bps) {
+      if (bps >= 1024 * 1024) return { num: (bps / 1024 / 1024).toFixed(1), unit: 'MB/s' };
+      if (bps >= 1024) return { num: (bps / 1024).toFixed(0), unit: 'KB/s' };
+      return { num: String(Math.round(bps)), unit: 'B/s' };
+    }
+
+    function setSpeed(id, unitId, bps) {
+      var s = fmtSpeed(bps || 0);
+      document.getElementById(id).textContent = s.num;
+      document.getElementById(unitId).textContent = s.unit;
+    }
+
+    // 每 2 秒：计算速度 → POST 上报 → GET 拉取 → 渲染面板
+    function syncStats() {
+      function calc(arr) {
+        var total = 0;
+        for (var i = 0; i < arr.length; i++) total += arr[i].bytes;
+        return total / 3; // 3 秒窗口 → bytes/s
+      }
+      myState.httpSpeed = calc(speedLog.HTTP);
+      myState.p2pDlSpeed = calc(speedLog.P2P);
+      myState.p2pUpSpeed = uploadKBs * 1024;
+
+      fetch(window.PEAR_BACKEND + '/v1/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(myState)
+      }).catch(function () {});
+      fetch(window.PEAR_BACKEND + '/v1/stats').then(function (r) { return r.json(); }).then(renderStats).catch(function () {});
+    }
+    setInterval(syncStats, 2000);
+
+    function renderStats(data) {
+      if (!data || !data.users) return;
+      var users = data.users || [];
+      var mine = null;
+      for (var i = 0; i < users.length; i++) {
+        if (users[i].user === me) { mine = users[i]; break; }
+      }
+      // 只显示本页数据（避免其它同 id 页面/聚合数据误导）；上报失败时全 0
+      var u = mine || {};
+
+      // 本页已下载完成 → 下载速度归零（避免残留窗口值误导）
+      var done = (u.progress || 0) >= 100;
+      setSpeed('spd-http', 'unit-http', done ? 0 : u.httpSpeed);
+      setSpeed('spd-p2p-dl', 'unit-p2p-dl', done ? 0 : u.p2pDlSpeed);
+      setSpeed('spd-p2p-up', 'unit-p2p-up', u.p2pUpSpeed);
+
+      // 块统计
+      var p2p = u.p2pBlocks || 0;
+      var http = u.httpBlocks || 0;
+      var sum = p2p + http;
+      document.getElementById('num-p2p').textContent = p2p;
+      document.getElementById('num-http').textContent = http;
+      document.getElementById('num-ratio').textContent = (sum ? (p2p / sum * 100).toFixed(1) : 0) + '%';
+
+      // 进度
+      var prog = u.progress || 0;
+      document.getElementById('bar-prog').style.width = prog + '%';
+      document.getElementById('num-prog').textContent = prog.toFixed(1) + '%';
+
+      // 堆叠条（占总块比例）
+      var total = u.totalChunks || 1;
+      document.getElementById('seg-p2p').style.width = (p2p / total * 100) + '%';
+      document.getElementById('seg-http').style.width = (http / total * 100) + '%';
+
+      // 在线数（卡片：只显示数字，"人"单位在 spd-unit）
+      document.getElementById('users-online').textContent = users.length;
+    }
+
+    function startPlayer() {
+    if (PearPlayer.isMSESupported()) {
+      var player = new PearPlayer('#pearvideo', {        scheduler: 'IdleFirst',
+        autoplay: true,
+        interval: 5000,
+        useDataChannel: IS_LOCAL,     // 本地 Fog 节点 DataChannel；外网走 WebTorrent（不连本机 WS）
+        dataChannels: 10,
+        useTorrent: true,         // 浏览器间 P2P（WebTorrent，走 tracker）
+        trackers: playerTrackers,         // tracker 服务器（?tracker= 参数 / API 返回，逗号分隔多地址）
+        magnetURI: playerMagnet,          // P2P 磁力（API 注册后返回）
+        torrentUrl: playerTorrentUrl,     // .torrent 直链（有则立即引导，无需等 peer 交换 metadata）
+        useMonitor: true,
+        debug: true,
+        algorithm: 'pull',        // player 默认 pull
+        geoEnabled: false
+      });
+
+      player.on('fallback', function () { log('FALLBACK：播放器降级', 'err'); document.getElementById('pearvideo').play(); });
+      player.on('begin', function (fileLength, chunks) { log('begin fileLength=' + (fileLength / 1024 / 1024).toFixed(2) + 'MB chunks=' + chunks, 'ok'); myState.totalChunks = chunks; });
+      player.on('progress', function (d) { log('progress ' + (d * 100).toFixed(1) + '%'); myState.progress = Math.min(100, d * 100); });
+      player.on('cloudspeed', function (s) { log('cloud speed ' + s + ' KB/s'); });
+      player.on('fogspeed', function (s) { log('fog speed ' + s + ' KB/s'); });
+      player.on('fograte', function (r) { log('fog ratio ' + (r * 100).toFixed(1) + '%'); });
+      player.on('sourcemap', function (t, i) { if (i % 20 === 0) log('sourcemap[' + i + ']=' + t); });
+      player.on('done', function () { log('DONE：下载完成', 'ok'); });
+      player.on('metadata', function (m) { log('metadata bitrate=' + Math.round(m.bitrate / 1024) + 'KB/s duration=' + m.duration + 's', 'ok'); });
+      player.on('canplay', function (d) { log('canplay delay=' + d + 'ms', 'ok'); });
+      player.on('traffic', function (mac, size, type) {
+        log('traffic type=' + type + ' mac=' + mac + ' ' + (size / 1024).toFixed(1) + 'KB');
+        if (type === 'WebRTC_Browser') { myState.p2pBlocks++; myState.p2pBytes += size; recordSpeed('P2P', size); }
+        else if (type === 'HTTP_Server' || type === 'HTTP_Node') { myState.httpBlocks++; myState.httpBytes += size; recordSpeed('HTTP', size); }
+      });
+      player.on('uploadspeed', function (kb) { uploadKBs = kb || 0; });
+      player.on('trackerinfo', function (list) { log('🔗 tracker 连接: ' + (list && list.length ? list.join(', ') : '无（种子无 announce）'), 'ok'); });
+      player.on('datachannelerror', function () { log('datachannel error（无 Fog 节点时正常）', 'warn'); });
+      player.on('httperror', function () { log('http error', 'err'); });
+      player.on('exception', function (e) { log('exception: ' + JSON.stringify(e), 'err'); });
+      window.__player = player; // 调试：暴露播放器实例（检查 WebTorrent 状态）
+    } else {
+      log('当前浏览器不支持 MSE', 'err');
+    }
+    }
+
+    // ===== 视频源引导（次级方案：?url=HTTP视频&magnet=磁力&torrent=.torrent直链&tracker=tracker服务器 → 服务端注册 → HTTP代理 + P2P） =====
+    var params = new URLSearchParams(location.search);
+    var videoUrl = params.get('url');
+    var videoMagnet = params.get('magnet');
+    var videoTorrent = params.get('torrent');
+    var videoTrackers = params.get('tracker');   // 逗号分隔多 tracker
+    var playerMagnet = null;        // 传给播放器的磁力（API 注册后返回，兜底用 URL 参数）
+    var playerTorrentUrl = null;    // 传给播放器的 .torrent 直链（API 返回 /boot/ 地址，兜底用 URL 参数）
+    var playerTrackers = null;      // 传给播放器的 tracker 列表（API 返回，兜底用 URL 参数）
+    var videoEl = document.getElementById('pearvideo');
+
+    function boot() {
+      if (videoUrl) {
+        log('⏳ 处理视频: ' + videoUrl + (videoMagnet ? ' （已带磁力 hash）' : ''), 'warn');
+        fetch(window.PEAR_BACKEND + '/v1/videos?url=' + encodeURIComponent(videoUrl))
+          .then(function (r) {
+            if (r.status === 404) {
+              // 未注册 → 自动注册（有 magnet=次级方案不下载视频；无 magnet=最佳方案下载生成种子）
+              return fetch(window.PEAR_BACKEND + '/v1/videos', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: videoUrl, magnet: videoMagnet, torrentUrl: videoTorrent })
+              }).then(function (r2) { return r2.json(); });
+            }
+            return r.json();
+          })
+          .then(function (data) {
+            if (data && data.video) {
+              var v = data.video;
+              playerMagnet = v.magnetURI || videoMagnet;
+              playerTorrentUrl = v.torrentUrl || videoTorrent;
+              // tracker：合并去重 = API trackers + ?tracker= 参数 + 兜底（自建 + 公共 wss，始终补充）
+              var TRACKERS_FALLBACK = ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com'];
+              var apiTrackers = (v.trackers && v.trackers.length) ? v.trackers
+                : (videoTrackers ? videoTrackers.split(',').filter(function (t) { return t }) : []);
+              playerTrackers = [];
+              var seenTracker = {};
+              apiTrackers.concat(TRACKERS_FALLBACK).forEach(function (t) {
+                if (t && !seenTracker[t]) { seenTracker[t] = true; playerTrackers.push(t); }
+              });
+              log('✅ 视频就绪: ' + v.name + ' infoHash=' + v.infoHash, 'ok');
+              log('   magnet=' + (v.magnetURI || '').slice(0, 60) + '...', 'ok');
+              log('   torrent=' + (playerTorrentUrl || '无（靠磁力 metadata 交换）'), 'ok');
+              log('   tracker=' + playerTrackers.join(', '), 'ok');
+              // HTTP 源：直连外链 CDN（服务端零视频上行）；仅本地文件时才走后端静态服务
+              videoEl.src = v.localFile ? (window.PEAR_BACKEND + '/' + v.rel) : v.url;
+              startPlayer();
+            } else {
+              log('视频注册失败: ' + ((data && data.error) || 'unknown'), 'err');
+              startPlayer();
+            }
+          })
+          .catch(function (e) { log('视频处理失败: ' + e.message, 'err'); startPlayer(); });
+      } else {
+        // 默认演示视频（Kaltura 外链）
+        videoEl.src = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4';
+        startPlayer();
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

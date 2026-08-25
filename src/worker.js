@@ -23,10 +23,13 @@ var RangeLoader = require('./range-loader');
 
 var PieceValidator = require('./piece-validator');
 
+// 后端地址支持运行时覆盖（本地联调用）：在加载本脚本前设置 window.PearConfig
+// { getNodesUrl, geoNodesUrl, signalWsUrl }
+var PEAR_CONFIG = (typeof window !== 'undefined' && window.PearConfig) ? window.PearConfig : {};
 // var WEBSOCKET_ADDR = 'ws://signal.webrtc.win:9600/ws';             //test
-var WEBSOCKET_ADDR = 'wss://signal.webrtc.win:7601/wss';
-var GETNODES_ADDR = 'https://api.webrtc.win:6601/v1/customer/nodes';
-var GETGEONODES_ADDR = 'https://api.webrtc.win/v1/customer/geo_nodes';
+var WEBSOCKET_ADDR = PEAR_CONFIG.signalWsUrl || 'wss://signal.webrtc.win:7601/wss';
+var GETNODES_ADDR = PEAR_CONFIG.getNodesUrl || 'https://api.webrtc.win:6601/v1/customer/nodes';
+var GETGEONODES_ADDR = PEAR_CONFIG.geoNodesUrl || 'https://api.webrtc.win/v1/customer/geo_nodes';
 var md5 = require('blueimp-md5')
 var BLOCK_LENGTH = 32 * 1024;
 
@@ -59,6 +62,7 @@ function Worker(urlStr, token, opts) {
     self.useMonitor = (opts.useMonitor === false)? false : true;
     self.useTorrent = (opts.useTorrent === false)? false : true;
     self.magnetURI = opts.magnetURI || undefined;
+    self.torrentUrl = opts.torrentUrl || undefined;   // .torrent 直链（有则立即引导，无需等 peer 交换 metadata）
     self.trackers = opts.trackers && Array.isArray(opts.trackers) && opts.trackers.length > 0 ? opts.trackers : null;
     self.sources = opts.sources && Array.isArray(opts.sources) && opts.sources.length > 0 ? opts.sources : null;
     self.auto = (opts.auto === false) ? false : true;
@@ -166,28 +170,13 @@ Worker.prototype._start = function () {
         self._getNodes(self.token, function (nodes) {
             debug('debug _getNodes: %j', nodes);
             if (nodes) {
-
-                var xhr = new XMLHttpRequest();
-                xhr.responseType = "arraybuffer";
-                xhr.open("GET", self.torrentUrl);
-                xhr.onload = function () {
-                    var response = this.response;
-                    // console.warn(response);
-                    self.validator = new PieceValidator(response);
-
-                    if (self.auto) {
-                        self._startPlaying(nodes);
-                    } else {
-                        self._initRangeLoader(nodes);
-                    }
+                // 纯 magnet 方案：不再下载 .torrent 文件，piece 哈希由 magnet metadata 提供
+                // （见 PearTorrent client.add 回调：torrent.torrentFile → PieceValidator）
+                if (self.auto) {
+                    self._startPlaying(nodes);
+                } else {
+                    self._initRangeLoader(nodes);
                 }
-                xhr.send();
-
-
-
-                // if (self.useDataChannel) {
-                //     self._pearSignalHandshake();
-                // }
             } else {
                 self._fallBackToWRTC();
             }
@@ -543,27 +532,76 @@ Worker.prototype._startPlaying = function (nodes) {
         //     }
         // }, {start: 30, end: 50});
 
-        if (self.useTorrent && self.magnetURI) {
-            var client = new PearTorrent();
-            // client.on('error', function () {
-            //
-            // });
-            debug('magnetURI:'+self.magnetURI);
-            client.add(self.magnetURI, {
-                    announce: self.trackers || [
-                        "wss://tracker.openwebtorrent.com",
-                        "wss://tracker.btorrent.xyz"
-                    ],
-                    store: d.store,
-                    bitfield: d.bitfield,
-                    strategy: 'rarest'
-                },
-                function (torrent) {
-                    debug('Torrent:', torrent);
-
-                    d.addTorrent(torrent);
+        if (self.useTorrent && (self.magnetURI || self.torrentUrl)) {
+            // WebRTC rtcConfig：优先用后端 /rtc_config 动态下发（多 STUN/TURN，模仿 instant.io）；
+            // 否则用内置默认多 STUN（多候选提高 NAT 打洞成功率）
+            var PEAR_DEFAULT_RTC = {
+                iceServers: [
+                    { urls: ['stun:stun.l.google.com:19302', 'stun:global.stun.twilio.com:3478', 'stun:stun.cloudflare.com:3478'] }
+                ]
+            };
+            var rtcConfig = (PEAR_CONFIG.rtcConfig && PEAR_CONFIG.rtcConfig.iceServers && PEAR_CONFIG.rtcConfig.iceServers.length)
+                ? PEAR_CONFIG.rtcConfig
+                : PEAR_DEFAULT_RTC;
+            // 覆盖 webtorrent 0.98 的无效 STUN（新版 Chrome 不认带 ?transport 的 URL，会导致 peer 创建失败）。
+            // 正确 API 是 tracker.rtcConfig（opts.rtcConfig 是 deprecated 兼容写法，不生效）
+            var client = new PearTorrent({
+                tracker: { rtcConfig: rtcConfig },
+                // 提高并发 peer 上限（默认 55）：同一 swarm 内连接更多节点，加速下载/分享
+                maxConns: 100
+            });
+            var addOpts = {
+                announce: self.trackers || [
+                    "wss://tracker.openwebtorrent.com",
+                    "wss://tracker.btorrent.xyz"
+                ],
+                store: d.store,
+                bitfield: d.bitfield,
+                strategy: 'rarest'
+            };
+            function torrentReady(torrent) {
+                debug('Torrent:', torrent);
+                d.addTorrent(torrent);
+                // 展示实际 tracker 连接列表（种子自带 announce + 前端补充 trackers 合并）
+                self.emit('trackerinfo', torrent.announce || []);
+                // piece 哈希来源：
+                //  - .torrent 直链（torrentUrl）：torrent.torrentFile = 完整 .torrent，立即创建 validator
+                //  - 纯 magnet：torrent.torrentFile = peer 交换来的 metadata buffer
+                if (!self.validator && torrent.torrentFile) {
+                    try {
+                        self.validator = new PieceValidator(torrent.torrentFile);
+                        debug('validator created, pieces=' + self.validator.piecesHash.length);
+                    } catch (e) {
+                        debug('validator creation failed: ' + e.message);
+                    }
                 }
-            );
+            }
+            if (self.torrentUrl) {
+                // .torrent 直链（更可靠引导）：下载后 add(buffer)，立即 ready，无需等 peer 交换 metadata
+                fetch(self.torrentUrl)
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('torrent http ' + r.status);
+                        return r.arrayBuffer();
+                    })
+                    .then(function (buf) {
+                        debug('torrentUrl loaded: ' + self.torrentUrl + ' (' + buf.byteLength + ' bytes)');
+                        // 必须用 Buffer（webtorrent parse-torrent 只认 Buffer；Uint8Array 会抛 Invalid torrent identifier）
+                        client.add(Buffer.from(buf), addOpts, torrentReady);
+                    })
+                    .catch(function (e) {
+                        debug('torrentUrl fetch failed: ' + e.message + ', fallback to magnet');
+                        if (self.magnetURI) client.add(self.magnetURI, addOpts, torrentReady);
+                    });
+            } else {
+                debug('magnetURI:' + self.magnetURI);
+                client.add(self.magnetURI, addOpts, torrentReady);
+            }
+            // 暴露 P2P 上传速度（KB/s）：播放器同时向其他 peer 做种上传
+            var uploadSpeedTimer = setInterval(function () {
+                if (self.destroyed) { clearInterval(uploadSpeedTimer); return; }
+                var up = client.uploadSpeed ? client.uploadSpeed / 1024 : 0;
+                self.emit('uploadspeed', up);
+            }, 1000);
         }
     });
 
@@ -762,6 +800,17 @@ function makeCandidateArr(sdp) {
         }
     }
 
+    // 提取数据通道所在 m-line 的真实 mid（原代码硬编码 "data"，与本机 SDP 的 a=mid:0 不匹配，
+    // 会导致 addIceCandidate 报 "Error processing ICE candidate"）
+    var mid = 'data';
+    var mid_reg = /^(a=mid:)/;
+    for (var i=0; i<rawArr.length; ++i) {
+        if (mid_reg.test(rawArr[i])) {
+            mid = rawArr[i].split(':')[1];
+            break
+        }
+    }
+
     var reg = /^(a=candidate)/;
     var candidateArr = [];
 
@@ -769,7 +818,7 @@ function makeCandidateArr(sdp) {
         if (reg.test(rawArr[i])) {
             rawArr[i] += ' generation 0 ufrag ' + ice_ufrag + ' network-cost 50';
             var candidates = {
-                "sdpMid":"data",
+                "sdpMid": mid,
                 "sdpMLineIndex":0
             };
             candidates.candidate = rawArr[i].substring(2);
