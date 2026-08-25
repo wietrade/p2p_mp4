@@ -347,7 +347,7 @@
               log('✅ 视频就绪: ' + v.name + ' infoHash=' + (v.infoHash || '无'), 'ok');
               log((v.hasTorrent && playerMagnet)
                 ? '✅ P2P 已启用（种子就绪）'
-                : '⚠️ 无种子参数 → 仅 HTTP 播放（P2P 需站长提供 magnet）', (v.hasTorrent && playerMagnet) ? 'ok' : 'warn');
+                : '⚠️ 无种子参数 → 仅 HTTP 播放（P2P 需站长提供 .torrent 直链）', (v.hasTorrent && playerMagnet) ? 'ok' : 'warn');
               log('   magnet=' + (v.magnetURI || '').slice(0, 60) + '...', 'ok');
               log('   torrent=' + (playerTorrentUrl || '无（靠磁力 metadata 交换）'), 'ok');
               log('   tracker=' + playerTrackers.join(', '), 'ok');

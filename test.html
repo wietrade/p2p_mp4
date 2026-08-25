@@ -44,15 +44,15 @@
   <section>
     <h4>① 示例视频（kaltura 100MB，加载时自动注册）</h4>
     <pre id="reg-result">自动注册中…（后端下载种子 → 解析 → 托管）</pre>
-    <label>📌 播放页参数：<span class="mono">url</span>（必要）｜<span class="mono">magnet</span>（站长提供，P2P 必需）｜<span class="mono">tracker</span>（可选）｜种子地址（自动托管）。不填 magnet 时该视频<b>仅 HTTP 播放（无 P2P）</b>；不传 url 时播放页默认演示视频（kaltura）。</label>
+    <label>📌 播放页参数：<span class="mono">url</span>（必要）｜<span class="mono">torrent</span>（站长提供 .torrent 直链，P2P 必需；magnet 由系统从种子解析）｜<span class="mono">tracker</span>（可选）。不填 torrent 时该视频<b>仅 HTTP 播放（无 P2P）</b>；不传 url 时播放页默认演示视频（kaltura）。</label>
     <div class="param-group">
       <div class="param-row">
         <span class="p-tag req">必要 · url</span>
         <input type="text" id="in-url" placeholder="HTTP 视频直链（mp4/webm），如 https://.../a.mp4">
       </div>
       <div class="param-row">
-        <span class="p-tag req">站长 · magnet（P2P 必需）</span>
-        <input type="text" id="in-magnet" placeholder="磁力：magnet:?xt=urn:btih:...（站长对视频文件做种生成；不填则仅 HTTP 播放）">
+        <span class="p-tag req">站长 · torrent（P2P 必需）</span>
+        <input type="text" id="in-torrent" placeholder=".torrent 种子 HTTP 直链，如 https://.../movie.mp4.torrent（不填则仅 HTTP 播放）">
         <span class="p-tag">可选 · tracker</span>
         <input type="text" id="in-tracker" placeholder="tracker 服务器（逗号分隔；留空自动合并公共 tracker）">
         <button onclick="playCustom()">▶ 注册并播放</button>
@@ -190,20 +190,20 @@
     // 播放页本身会查询/自动注册该视频（GET 404 → POST 注册），这里只负责把参数传给播放页
     function initCustom() {
       $('in-url').value = DEMO.url
-      $('in-magnet').value = DEMO.magnet
-      $('in-tracker').value = ''   // tracker 可选：留空由播放页自动合并公共 tracker
+      $('in-torrent').value = DEMO.torrentUrl   // 默认用 kaltura 的 .torrent 直链（HTTP）
+      $('in-tracker').value = ''                // tracker 可选：留空由播放页自动合并公共 tracker
     }
     function playCustom() {
       var u = $('in-url').value.trim()
-      var m = $('in-magnet').value.trim()
+      var tr = $('in-torrent').value.trim()
       var t = $('in-tracker').value.trim()
       if (!u) { showResult('请先填写视频 URL（必要参数）\n'); return }
       var q = 'url=' + encodeURIComponent(u)
-      if (m) q += '&magnet=' + encodeURIComponent(m)
+      if (tr) q += '&torrent=' + encodeURIComponent(tr)
       if (t) q += '&tracker=' + encodeURIComponent(t)
-      if (!m) showResult('⚠️ 未提供 magnet → 该视频仅 HTTP 播放（无 P2P 加速）\n')
+      if (!tr) showResult('⚠️ 未提供 torrent 种子直链 → 该视频仅 HTTP 播放（无 P2P 加速）\n')
       setPlayer(playerUrl(q))
-      showResult('▶ 播放自定义 URL（播放页自动注册/查询该视频）\n', { url: u, magnet: m || null, tracker: t || null })
+      showResult('▶ 播放自定义 URL（播放页自动注册/查询该视频；magnet 由系统从种子解析）\n', { url: u, torrentUrl: tr || null, tracker: t || null })
       loadList()
     }
     initCustom()
