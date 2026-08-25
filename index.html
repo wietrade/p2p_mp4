@@ -187,7 +187,7 @@
     document.getElementById('stat-user').textContent = '（用户 ' + me + '）';
 
     // 本页状态（播放器事件 → myState → POST 上报）
-    var myState = { user: me, httpBlocks: 0, p2pBlocks: 0, httpSpeed: 0, p2pDlSpeed: 0, p2pUpSpeed: 0, progress: 0, totalChunks: 0, p2pBytes: 0, httpBytes: 0 };
+    var myState = { user: me, httpBlocks: 0, p2pBlocks: 0, httpSpeed: 0, p2pDlSpeed: 0, p2pUpSpeed: 0, progress: 0, totalChunks: 0, p2pBytes: 0, httpBytes: 0, peerCount: undefined };
 
     // 速度滑动窗口（3 秒）
     var speedLog = { HTTP: [], P2P: [] };
@@ -244,10 +244,13 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(myState)
       }).catch(function () {});
-      // 在线人数来自 tracker swarm（API），失败则保持 '--'；不影响速度/块数渲染
+      // 在线用户 = 本页实际 P2P 连接数（peerId 数量，来自播放器 peercount 事件）
+      var pcEl = document.getElementById('users-online');
+      pcEl.textContent = (myState.peerCount === undefined || myState.peerCount === null) ? '--' : myState.peerCount;
+      // 全局 swarm 人数（tracker 报告）作为悬浮提示；不影响本页连接数渲染
       fetch(window.PEAR_BACKEND + '/v1/stats').then(function (r) { return r.json(); }).then(function (data) {
         var sw = (data && data.swarms && myState.infoHash) ? data.swarms[myState.infoHash] : null;
-        document.getElementById('users-online').textContent = sw ? sw.count : '--';
+        if (sw) pcEl.title = 'swarm 全局 ' + sw.count + ' 人';
       }).catch(function () {});
     }
     setInterval(syncStats, 2000);
@@ -310,6 +313,7 @@
         else if (type === 'HTTP_Server' || type === 'HTTP_Node') { myState.httpBlocks++; myState.httpBytes += size; recordSpeed('HTTP', size); }
       });
       player.on('uploadspeed', function (kb) { uploadKBs = kb || 0; });
+      player.on('peercount', function (n) { myState.peerCount = n; }); // 本页真实 P2P 连接数
       player.on('trackerinfo', function (list) { log('🔗 tracker 连接: ' + (list && list.length ? list.join(', ') : '无（种子无 announce）'), 'ok'); });
       player.on('datachannelerror', function () { log('datachannel error（无 Fog 节点时正常）', 'warn'); });
       player.on('httperror', function () { log('http error', 'err'); });

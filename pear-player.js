@@ -34624,6 +34624,9 @@ Worker.prototype._startPlaying = function (nodes) {
                 if (self.destroyed) { clearInterval(uploadSpeedTimer); return; }
                 var up = client.uploadSpeed ? client.uploadSpeed / 1024 : 0;
                 self.emit('uploadspeed', up);
+                // 真实 P2P 连接数（本页实际连到的 peer 数 = torrent.wires.length）
+                var pc = (self.torrent && self.torrent.wires) ? self.torrent.wires.length : 0;
+                self.emit('peercount', pc);
             }, 1000);
         }
     });
