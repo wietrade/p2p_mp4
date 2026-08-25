@@ -27,7 +27,12 @@
     .badge.downloadmeta { background: #bf870033; color: #e3b341; border: 1px solid #bf870055; }
     .badge.none { background: #484f5833; color: #8b949e; border: 1px solid #484f5855; }
     iframe#player { width: 100%; height: 520px; border: 1px solid #30363d; border-radius: 8px; background: #000; margin-top: 10px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .param-group { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+    .param-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .param-row input { width: auto; flex: 1; min-width: 200px; }
+    .p-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; background: #30363d; color: #8b949e; flex: 0 0 auto; }
+    .p-tag.req { background: #da363333; color: #ff7b72; border: 1px solid #da363355; }
     .mono { font-family: Consolas, monospace; }
   </style>
 </head>
@@ -39,6 +44,20 @@
   <section>
     <h4>① 示例视频（kaltura 100MB，加载时自动注册）</h4>
     <pre id="reg-result">自动注册中…（后端下载种子 → 解析 → 托管）</pre>
+    <label>📌 播放页参数：<span class="mono">url</span>（必要）+ <span class="mono">magnet / tracker</span>（可选）；不传 url 时播放页默认演示视频（kaltura）。</label>
+    <div class="param-group">
+      <div class="param-row">
+        <span class="p-tag req">必要 · url</span>
+        <input type="text" id="in-url" placeholder="HTTP 视频直链（mp4/webm），如 https://.../a.mp4">
+      </div>
+      <div class="param-row">
+        <span class="p-tag">可选 · magnet</span>
+        <input type="text" id="in-magnet" placeholder="磁力 hash：magnet:?xt=urn:btih:...（已有种子时跳过下载生成）">
+        <span class="p-tag">可选 · tracker</span>
+        <input type="text" id="in-tracker" placeholder="tracker 服务器（逗号分隔；留空自动合并公共 tracker）">
+        <button onclick="playCustom()">▶ 注册并播放</button>
+      </div>
+    </div>
   </section>
 
   <!-- ② 已注册视频列表 -->
@@ -166,6 +185,27 @@
       magnet: 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4',
       torrentUrl: 'https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent'
     }
+
+    // ===== 自定义 URL 播放（用户可传入任意 HTTP 视频直链；默认填演示视频） =====
+    // 播放页本身会查询/自动注册该视频（GET 404 → POST 注册），这里只负责把参数传给播放页
+    function initCustom() {
+      $('in-url').value = DEMO.url
+      $('in-magnet').value = DEMO.magnet
+      $('in-tracker').value = ''   // tracker 可选：留空由播放页自动合并公共 tracker
+    }
+    function playCustom() {
+      var u = $('in-url').value.trim()
+      var m = $('in-magnet').value.trim()
+      var t = $('in-tracker').value.trim()
+      if (!u) { showResult('请先填写视频 URL（必要参数）\n'); return }
+      var q = 'url=' + encodeURIComponent(u)
+      if (m) q += '&magnet=' + encodeURIComponent(m)
+      if (t) q += '&tracker=' + encodeURIComponent(t)
+      setPlayer(playerUrl(q))
+      showResult('▶ 播放自定义 URL（播放页自动注册/查询该视频）\n', { url: u, magnet: m || null, tracker: t || null })
+      loadList()
+    }
+    initCustom()
     autoRegister(DEMO)
   </script>
 </body>
