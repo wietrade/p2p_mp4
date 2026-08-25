@@ -29161,9 +29161,13 @@ Dispatcher.prototype._setupHttp = function (hd) {
             // （webtorrent 内部自建 bitfield，与 dispatcher.bitfield 相互独立）
             if (self.torrent && self.torrent.bitfield) {
                 self.torrent.bitfield.set(index, true);
-                // 核心混合传输：块已下载完成 → 广播 have 给所有已连接 peer，
-                // 对方才知道我们持有该块并可请求（否则对方只认连接时的 bitfield，
-                // 后续 HTTP 下载的块永远不被请求，导致分享/上传为 0 且互相 choke）
+                // 核心混合传输（与 webtorrent 原生逻辑一致，见 torrent.js _onPiece）：
+                // webtorrent 以 pieces[index] === null 作为“块已下载完成、可分享”的判定，
+                // 响应 peer 请求时 if (self.pieces[index]) return —— 不置 null 则拒绝响应（上传恒为 0）。
+                // 完整链路 = pieces=null（可分享）+ bitfield（告知）+ store（数据）+ have（广播增量）
+                if (self.torrent.pieces && self.torrent.pieces[index]) {
+                    self.torrent.pieces[index] = null;
+                }
                 if (self.torrent.wires) {
                     for (var wi = 0; wi < self.torrent.wires.length; wi++) {
                         var ww = self.torrent.wires[wi];
@@ -29227,7 +29231,11 @@ Dispatcher.prototype._setupDC = function (jd) {
             // 同步到 WebTorrent 的 bitfield（DC 下载的数据也可做种）
             if (self.torrent && self.torrent.bitfield) {
                 self.torrent.bitfield.set(index, true);
-                // 广播 have：DC 下载完成的块通知所有 peer 可请求
+                // 核心混合传输（与 webtorrent 原生逻辑一致）：DC 下载完成的块
+                // pieces[index]=null 标记可分享 + have 广播通知 peer
+                if (self.torrent.pieces && self.torrent.pieces[index]) {
+                    self.torrent.pieces[index] = null;
+                }
                 if (self.torrent.wires) {
                     for (var wi = 0; wi < self.torrent.wires.length; wi++) {
                         var ww = self.torrent.wires[wi];
@@ -34561,11 +34569,6 @@ Worker.prototype._startPlaying = function (nodes) {
                 d.addTorrent(torrent);
                 // 展示实际 tracker 连接列表（种子自带 announce + 前端补充 trackers 合并）
                 self.emit('trackerinfo', torrent.announce || []);
-                // 打破 P2P choking 死锁：webtorrent 按 peer 的 downloadSpeed（对方给我们的速度）
-                // 排序 unchoke，双方都等对方先传 → 互相 choke → 数据停滞。
-                // 视频 P2P 场景用户都愿意分享，强制：提高 unchoke 槽位 + 连接后立即 unchoke
-                // + 覆盖 choke 为空操作（永远不 choke，主动分享已下块，对方拿到数据后会 unchoke 我们）
-                torrent._rechokeNumSlots = 999;
                 // 调试：统计每个 peer wire 的请求/下载状态，定位 P2P 只传几块后停止的问题
                 var wireStats = [];
                 torrent.on('wire', function (wire, addr) {
@@ -34573,12 +34576,6 @@ Worker.prototype._startPlaying = function (nodes) {
                     wireStats.push(stat);
                     if (wireStats.length > 20) wireStats.shift();
                     debug('wt wire ' + addr);
-                    // 强制 unchoke（我们端永远不 choke，全力分享已下载块）
-                    wire.amChoking = false;
-                    if (wire.unchoke) { try { wire.unchoke(); } catch (e) {} }
-                    if (wire.choke) {
-                        wire.choke = function () { wire.amChoking = false; };
-                    }
                     wire.on('request', function (i, offset, length) {
                         stat.requests++;
                         stat.choked = wire.peerChoking;
