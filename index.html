@@ -137,7 +137,20 @@
     };
   </script>
 
-  <!-- 加载重新构建的播放器（已支持 window.PearConfig 覆盖后端地址）；相对路径兼容 GitHub Pages 子目录 -->
+  <!-- 动态拉取 WebRTC rtcConfig（多 STUN/TURN，模仿 instant.io /__rtcConfig__）；失败用播放器内置默认。
+       worker 在 _startPlaying 时才读取（晚于本请求），故通常已就绪；即使未就绪也有内置多 STUN 兜底 -->
+  <script>
+    fetch(window.PEAR_BACKEND + '/rtc_config')
+      .then(function (r) { return r.json() })
+      .then(function (d) {
+        if (d && d.rtcConfig && d.rtcConfig.iceServers && d.rtcConfig.iceServers.length) {
+          window.PearConfig.rtcConfig = d.rtcConfig;
+        }
+      })
+      .catch(function () {});
+  </script>
+
+  <!-- 加载重新构建的播放器（已支持 window.PearConfig 覆盖后端地址 + rtcConfig 动态下发）；相对路径兼容 GitHub Pages 子目录 -->
   <script src="./pear-player.js"></script>
   <script>
     function log(msg, cls) {
@@ -311,9 +324,10 @@
               var v = data.video;
               playerMagnet = v.magnetURI || videoMagnet;
               playerTorrentUrl = v.torrentUrl || videoTorrent;
-              // tracker：API 返回的 trackers 优先；否则用 ?tracker= 参数（逗号分隔）；再否则默认 43 服务器
+              // tracker：API 返回的 trackers 优先；否则用 ?tracker= 参数（逗号分隔）；再否则自建 tracker + 公共兜底
               playerTrackers = (v.trackers && v.trackers.length) ? v.trackers
-                : (videoTrackers ? videoTrackers.split(',').filter(function (t) { return t }) : ['wss://bot3.1230sb.com/tracker']);
+                : (videoTrackers ? videoTrackers.split(',').filter(function (t) { return t })
+                  : ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xyz']);
               log('✅ 视频就绪: ' + v.name + ' infoHash=' + v.infoHash, 'ok');
               log('   magnet=' + (v.magnetURI || '').slice(0, 60) + '...', 'ok');
               log('   torrent=' + (playerTorrentUrl || '无（靠磁力 metadata 交换）'), 'ok');

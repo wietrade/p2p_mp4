@@ -34507,14 +34507,20 @@ Worker.prototype._startPlaying = function (nodes) {
         // }, {start: 30, end: 50});
 
         if (self.useTorrent && (self.magnetURI || self.torrentUrl)) {
+            // WebRTC rtcConfig：优先用后端 /rtc_config 动态下发（多 STUN/TURN，模仿 instant.io）；
+            // 否则用内置默认多 STUN（多候选提高 NAT 打洞成功率）
+            var PEAR_DEFAULT_RTC = {
+                iceServers: [
+                    { urls: ['stun:stun.l.google.com:19302', 'stun:global.stun.twilio.com:3478', 'stun:stun.cloudflare.com:3478'] }
+                ]
+            };
+            var rtcConfig = (PEAR_CONFIG.rtcConfig && PEAR_CONFIG.rtcConfig.iceServers && PEAR_CONFIG.rtcConfig.iceServers.length)
+                ? PEAR_CONFIG.rtcConfig
+                : PEAR_DEFAULT_RTC;
             // 覆盖 webtorrent 0.98 的无效 STUN（新版 Chrome 不认带 ?transport 的 URL，会导致 peer 创建失败）。
             // 正确 API 是 tracker.rtcConfig（opts.rtcConfig 是 deprecated 兼容写法，不生效）
             var client = new PearTorrent({
-                tracker: {
-                    rtcConfig: {
-                        iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
-                    }
-                }
+                tracker: { rtcConfig: rtcConfig }
             });
             var addOpts = {
                 announce: self.trackers || [
