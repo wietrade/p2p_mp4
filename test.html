@@ -27,7 +27,9 @@
     .badge.downloadmeta { background: #bf870033; color: #e3b341; border: 1px solid #bf870055; }
     .badge.none { background: #484f5833; color: #8b949e; border: 1px solid #484f5855; }
     iframe#player { width: 100%; height: 520px; border: 1px solid #30363d; border-radius: 8px; background: #000; margin-top: 10px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row input { width: auto; flex: 1; min-width: 220px; }
+    .row #in-magnet { flex: 2; }
     .mono { font-family: Consolas, monospace; }
   </style>
 </head>
@@ -39,6 +41,12 @@
   <section>
     <h4>① 示例视频（kaltura 100MB，加载时自动注册）</h4>
     <pre id="reg-result">自动注册中…（后端下载种子 → 解析 → 托管）</pre>
+    <label>📌 播放页核心参数 <span class="mono">url</span>（HTTP 视频直链，必填）：<span class="mono">?url=&lt;视频直链&gt;&amp;magnet=&lt;磁力可选&gt;&amp;tracker=&lt;tracker可选&gt;</span>；不传 url 时播放页默认演示视频（kaltura）。</label>
+    <div class="row">
+      <input type="text" id="in-url" placeholder="HTTP 视频直链（mp4/webm），可填任意外链视频">
+      <input type="text" id="in-magnet" placeholder="（可选）磁力 hash：magnet:?xt=urn:btih:...">
+      <button onclick="playCustom()">▶ 注册并播放此 URL</button>
+    </div>
   </section>
 
   <!-- ② 已注册视频列表 -->
@@ -166,6 +174,24 @@
       magnet: 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4',
       torrentUrl: 'https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent'
     }
+
+    // ===== 自定义 URL 播放（用户可传入任意 HTTP 视频直链；默认填演示视频） =====
+    // 播放页本身会查询/自动注册该视频（GET 404 → POST 注册），这里只负责把参数传给播放页
+    function initCustom() {
+      $('in-url').value = DEMO.url
+      $('in-magnet').value = DEMO.magnet
+    }
+    function playCustom() {
+      var u = $('in-url').value.trim()
+      var m = $('in-magnet').value.trim()
+      if (!u) { showResult('请先填写视频 URL\n'); return }
+      var q = 'url=' + encodeURIComponent(u)
+      if (m) q += '&magnet=' + encodeURIComponent(m)
+      setPlayer(playerUrl(q))
+      showResult('▶ 播放自定义 URL（播放页自动注册/查询该视频）\n', { url: u, magnet: m || null })
+      loadList()
+    }
+    initCustom()
     autoRegister(DEMO)
   </script>
 </body>
