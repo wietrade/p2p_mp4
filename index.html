@@ -211,34 +211,33 @@
       myState.p2pDlSpeed = calc(speedLog.P2P);
       myState.p2pUpSpeed = uploadKBs * 1024;
 
+      // 本地实时渲染（速度/块数/进度用本页数据，不依赖后端回显——API 失败也不冻结）
+      renderLocal();
+
       fetch(window.PEAR_BACKEND + '/v1/stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(myState)
       }).catch(function () {});
-      fetch(window.PEAR_BACKEND + '/v1/stats').then(function (r) { return r.json(); }).then(renderStats).catch(function () {});
+      // 在线人数来自 tracker swarm（API），失败则保持 '--'；不影响速度/块数渲染
+      fetch(window.PEAR_BACKEND + '/v1/stats').then(function (r) { return r.json(); }).then(function (data) {
+        var sw = (data && data.swarms && myState.infoHash) ? data.swarms[myState.infoHash] : null;
+        document.getElementById('users-online').textContent = sw ? sw.count : '--';
+      }).catch(function () {});
     }
     setInterval(syncStats, 2000);
 
-    function renderStats(data) {
-      if (!data || !data.users) return;
-      var users = data.users || [];
-      var mine = null;
-      for (var i = 0; i < users.length; i++) {
-        if (users[i].user === me) { mine = users[i]; break; }
-      }
-      // 只显示本页数据（避免其它同 id 页面/聚合数据误导）；上报失败时全 0
-      var u = mine || {};
-
+    // 本地实时面板：速度/块数/进度（本页 myState，与后端聚合无关）
+    function renderLocal() {
       // 本页已下载完成 → 下载速度归零（避免残留窗口值误导）
-      var done = (u.progress || 0) >= 100;
-      setSpeed('spd-http', 'unit-http', done ? 0 : u.httpSpeed);
-      setSpeed('spd-p2p-dl', 'unit-p2p-dl', done ? 0 : u.p2pDlSpeed);
-      setSpeed('spd-p2p-up', 'unit-p2p-up', u.p2pUpSpeed);
+      var done = (myState.progress || 0) >= 100;
+      setSpeed('spd-http', 'unit-http', done ? 0 : myState.httpSpeed);
+      setSpeed('spd-p2p-dl', 'unit-p2p-dl', done ? 0 : myState.p2pDlSpeed);
+      setSpeed('spd-p2p-up', 'unit-p2p-up', myState.p2pUpSpeed);
 
       // 块统计
-      var p2p = u.p2pBlocks || 0;
-      var http = u.httpBlocks || 0;
+      var p2p = myState.p2pBlocks || 0;
+      var http = myState.httpBlocks || 0;
       var sum = p2p + http;
       document.getElementById('num-p2p').textContent = p2p;
       document.getElementById('num-http').textContent = http;
@@ -246,16 +245,11 @@
 
       // 单一条：长度 = 进度（P2P绿 + HTTP黄 各占已下载比例），分段 = 来源构成
       // 例：100 块，HTTP 20 + P2P 25 → 条长 45%（绿25% + 黄20%），进度文字 45.0%
-      var total = u.totalChunks || 1;
+      var total = myState.totalChunks || 1;
       var prog = total ? ((p2p + http) / total * 100) : 0;
       document.getElementById('num-prog').textContent = prog.toFixed(1) + '%';
       document.getElementById('seg-p2p').style.width = (p2p / total * 100) + '%';
       document.getElementById('seg-http').style.width = (http / total * 100) + '%';
-
-      // 在线数：真实 P2P 连接人数（tracker swarm，按当前视频 infoHash；不是打开页面数）
-      // 刷新 = 旧 WS 断开 + 新 WS 建立 → 人数不变；无 infoHash（纯 HTTP 演示）显示 --
-      var sw = (data.swarms && myState.infoHash) ? data.swarms[myState.infoHash] : null;
-      document.getElementById('users-online').textContent = sw ? sw.count : '--';
     }
 
     function startPlayer() {
