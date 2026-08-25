@@ -215,11 +215,21 @@
     function syncStats() {
       function calc(arr) {
         if (!arr.length) return 0;
+        // 窗口清理不能在 traffic 时才做（P2P 停止后无新事件，旧记录永不清理 → 速度冻结）
+        var now = Date.now();
         var total = 0;
-        for (var i = 0; i < arr.length; i++) total += arr[i].bytes;
+        var first = null;
+        var last = null;
+        for (var i = 0; i < arr.length; i++) {
+          if (arr[i].t < now - 3000) continue;   // 过滤过期记录（3s 窗口）
+          total += arr[i].bytes;
+          if (first === null) first = arr[i].t;
+          last = arr[i].t;
+        }
+        if (!total) return 0;
         // 按实际窗口时间跨度计算；单样本时按窗口上限（3s）估算，
         // 避免把整块字节数直接当"每秒速度"虚高（如 512KB 块显示成 512KB/s）
-        var span = (arr[arr.length - 1].t - arr[0].t) / 1000;
+        var span = (last - first) / 1000;
         return span > 0 ? total / span : total / 3;
       }
       myState.httpSpeed = calc(speedLog.HTTP);
