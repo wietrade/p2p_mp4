@@ -34520,7 +34520,9 @@ Worker.prototype._startPlaying = function (nodes) {
             // 覆盖 webtorrent 0.98 的无效 STUN（新版 Chrome 不认带 ?transport 的 URL，会导致 peer 创建失败）。
             // 正确 API 是 tracker.rtcConfig（opts.rtcConfig 是 deprecated 兼容写法，不生效）
             var client = new PearTorrent({
-                tracker: { rtcConfig: rtcConfig }
+                tracker: { rtcConfig: rtcConfig },
+                // 提高并发 peer 上限（默认 55）：同一 swarm 内连接更多节点，加速下载/分享
+                maxConns: 100
             });
             var addOpts = {
                 announce: self.trackers || [
