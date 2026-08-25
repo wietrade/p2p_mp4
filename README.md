@@ -142,6 +142,8 @@ pearplayer/
 | `seed.html` | 浏览器做种页（可并入播放页） |
 | `webtorrent.min.js` | WebTorrent 浏览器 bundle |
 
+> **UI/响应式**：两个页面均 `max-width` 限宽居中 + `@media ≤640px` 移动端适配（速度卡 2×2、参数列式、日志压缩、iframe 收窄）+ 跨平台字体栈 + `box-sizing: border-box`。
+
 ---
 
 ## 五、构建与开发
@@ -254,7 +256,10 @@ ssh -i I:\1H\43.165.167.132_id_ed25519 root@43.165.167.132 '
 
 | 项 | 修复 |
 |:--|:--|
-| SSRF | 注册校验内网 + `/proxy` 转发前二次校验（`isPrivateHost`） |
+| SSRF | 注册校验内网 + `/proxy` 转发前二次校验（`isPrivateHost`）；**torrentUrl / 磁力 xs 直链同样校验**（`assertPublicHttpUrl`，2026-08-25 补） |
+| 注册并发 | 同 url **单飞去重**（in-flight Map），并发 POST 只处理一次 |
+| 注册表原子写 | `videos.json` 写临时文件 + `rename` 原子替换，防崩溃损坏 |
+| 开放注册限流 | `POST /v1/videos` 按 IP 每分钟 10 次，超限 429 |
 | HTTP 状态码 | `http-downloader` `\|\|` → `&&` + Content-Range 空保护 |
 | 路径穿越 | 种子 `parsed.name` → `sanitize` 去 `..` |
 | 磁盘打满 | 下载大小上限 `maxDownloadBytes`（默认 2GB） |
