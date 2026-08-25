@@ -42,11 +42,13 @@ function loadVideos() {
   }
 }
 
-/** 注册后保存记录到磁盘 */
+/** 注册后保存记录到磁盘（临时文件 + rename 原子替换，防崩溃损坏） */
 function saveVideos() {
   try {
     fs.mkdirSync(dataDir, { recursive: true })
-    fs.writeFileSync(videosFile, JSON.stringify(Array.from(videos.values()), null, 2))
+    const tmp = videosFile + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(Array.from(videos.values()), null, 2))
+    fs.renameSync(tmp, videosFile)
   } catch (e) {
     console.warn('[video-service] 保存注册记录失败:', e.message)
   }
@@ -79,6 +81,22 @@ function isPrivateHost(host) {
   )
 }
 
+/** SSRF 防护（通用）：校验任意 http/https 直链的 host 不是内网/回环/链路本地，返回 URL 对象 */
+function assertPublicHttpUrl(u) {
+  let p
+  try {
+    p = new URL(u)
+  } catch (e) {
+    throw new Error('invalid url: ' + u)
+  }
+  if (!/^https?:$/.test(p.protocol)) throw new Error('only http/https url supported')
+  if (isPrivateHost(p.hostname)) throw new Error('private/internal address not allowed: ' + p.host)
+  return p
+}
+
+// 同一 url 并发注册去重（单飞：并发 POST 只处理一次）
+const registerInFlight = new Map()
+
 /**
  * 注册一个 HTTP 视频（P2P 需要站长提供磁力/种子参数）
  * @param {string} url HTTP 视频直链（必要）
@@ -86,18 +104,17 @@ function isPrivateHost(host) {
  * @param {string} [magnet] 磁力链接（站长提供，P2P 必需；提供则不下载视频）
  * @param {string} [torrentUrl] 外部 .torrent 直链（可选，加速引导）
  */
-async function registerVideo(url, name, magnet, torrentUrl) {
-  if (videos.has(url)) return videos.get(url)
+function registerVideo(url, name, magnet, torrentUrl) {
+  if (videos.has(url)) return Promise.resolve(videos.get(url))
+  if (registerInFlight.has(url)) return registerInFlight.get(url)
+  const p = _registerVideo(url, name, magnet, torrentUrl).finally(() => registerInFlight.delete(url))
+  registerInFlight.set(url, p)
+  return p
+}
 
-  let parsedUrl
-  try {
-    parsedUrl = new URL(url)
-  } catch (e) {
-    throw new Error('invalid url: ' + url)
-  }
-  if (!/^https?:$/.test(parsedUrl.protocol)) throw new Error('only http/https url supported')
-  // SSRF 防护：拒绝内网/回环/链路本地地址的注册（防止通过 /proxy/{id} 探测内网）
-  if (isPrivateHost(parsedUrl.hostname)) throw new Error('private/internal address not allowed: ' + parsedUrl.host)
+async function _registerVideo(url, name, magnet, torrentUrl) {
+  // SSRF 防护：视频直链 host 必须是公网（防止通过 /proxy/{id} 探测内网）
+  assertPublicHttpUrl(url)
 
   const id = crypto.createHash('md5').update(url).digest('hex').slice(0, 10)
 
@@ -117,6 +134,8 @@ async function registerVideo(url, name, magnet, torrentUrl) {
   }
   // ===== 无磁力但有 .torrent 直链（HTTP 格式）：下载种子 → 代码解析出 magnet → P2P =====
   if (torrentUrl) {
+    // SSRF：.torrent 直链 host 也必须是公网（防止服务器下载内网种子探测内网）
+    assertPublicHttpUrl(torrentUrl)
     return registerWithTorrentUrl(url, id, name, torrentUrl)
   }
   // ===== 无种子参数：纯 HTTP 注册（P2P 需站长提供 .torrent 直链） =====
@@ -237,6 +256,13 @@ async function registerWithMagnet(url, id, magnet, name, torrentUrl) {
     if (xs) xsCandidates.push(xs)
     if (torrentUrl) xsCandidates.push(torrentUrl)
     for (const u of xsCandidates) {
+      // SSRF：直链 host 必须是公网（磁力 xs / 外部 torrentUrl 可能是内网地址）
+      try {
+        assertPublicHttpUrl(u)
+      } catch (e) {
+        console.warn('[video-service] 跳过内网/非法直链:', u)
+        continue
+      }
       console.log('[video-service] 从直链下载 .torrent:', u)
       try {
         const buf = await downloadBuffer(u)
@@ -305,6 +331,8 @@ async function registerWithMagnet(url, id, magnet, name, torrentUrl) {
 
 /** 站长提供 .torrent 直链（HTTP 格式）：下载种子（几 KB，非视频）→ 代码解析出 magnet/infoHash → P2P 注册 */
 async function registerWithTorrentUrl(url, id, name, torrentUrl) {
+  // SSRF 双保险：直链 host 必须是公网
+  assertPublicHttpUrl(torrentUrl)
   // 1. 下载 .torrent（小文件）并解析
   let buf, parsed
   try {

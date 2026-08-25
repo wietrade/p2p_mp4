@@ -25,6 +25,21 @@ const ROOT = path.join(__dirname, '..') // 仓库根
 // 实时统计存储：user → 最近上报的统计数据（供 /v1/stats 聚合）
 const statsStore = new Map()
 
+// 开放注册限流：按 IP 每分钟最多 10 次（防批量灌入恶意注册）
+const regLimits = new Map()
+const REG_LIMIT_PER_MIN = 10
+function rateLimited(ip) {
+  const now = Date.now()
+  const arr = (regLimits.get(ip) || []).filter((t) => now - t < 60000)
+  if (arr.length >= REG_LIMIT_PER_MIN) {
+    regLimits.set(ip, arr)
+    return true
+  }
+  arr.push(now)
+  regLimits.set(ip, arr)
+  return false
+}
+
 function sendFile(res, filePath, mime, status = 200) {
   fs.stat(filePath, (err, st) => {
     if (err || !st.isFile()) {
@@ -151,6 +166,13 @@ const server = http.createServer((req, res) => {
       return
     }
     if (req.method === 'POST') {
+      // 限流：x-forwarded-for 优先（nginx 反代），回退 socket 地址
+      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim()
+      if (rateLimited(ip)) {
+        res.statusCode = 429
+        res.end(JSON.stringify({ ok: false, error: 'too many registrations, slow down' }))
+        return
+      }
       let body = ''
       req.on('data', (c) => {
         body += c
