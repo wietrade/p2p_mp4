@@ -303,7 +303,9 @@
 
     // ===== 视频源引导（次级方案：?url=HTTP视频&magnet=磁力&torrent=.torrent直链&tracker=tracker服务器 → 服务端注册 → HTTP代理 + P2P） =====
     var params = new URLSearchParams(location.search);
-    var videoUrl = params.get('url');
+    // 默认演示视频（Kaltura 外链）：无 ?url= 时也走注册流程（拿 infoHash → 在线人数/磁力/种子，启用 P2P）
+    var DEFAULT_URL = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4';
+    var videoUrl = params.get('url') || DEFAULT_URL;
     var videoMagnet = params.get('magnet');
     var videoTorrent = params.get('torrent');
     var videoTrackers = params.get('tracker');   // 逗号分隔多 tracker
@@ -356,8 +358,8 @@
           })
           .catch(function (e) { log('视频处理失败: ' + e.message, 'err'); startPlayer(); });
       } else {
-        // 默认演示视频（Kaltura 外链）
-        videoEl.src = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4';
+        // 兜底：理论上不会到达（videoUrl 恒有默认值）
+        videoEl.src = DEFAULT_URL;
         startPlayer();
       }
     }
