@@ -155,8 +155,21 @@
     }
 
     // ===== 统计面板（API 方式：POST /v1/stats 上报 → 后端聚合 → GET 轮询渲染） =====
-    // 每个页面唯一 id（避免多页面 url 相同 → id 相同 → stats 互相覆盖）
-    var me = new URLSearchParams(location.search).get('user') || ('u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    // 客户端唯一标识：优先 ?user=（测试多客户端用）；否则用 localStorage 持久 id。
+    // 刷新/重开页面复用同一 id → 后端按 user 覆盖 → 在线人数不会随刷新虚增。
+    // 同一浏览器多标签页共享同一 id（按"客户端"计人数，更符合真实语义）。
+    var me = new URLSearchParams(location.search).get('user');
+    if (!me) {
+      try {
+        me = localStorage.getItem('pear_client_id');
+        if (!me) {
+          me = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+          localStorage.setItem('pear_client_id', me);
+        }
+      } catch (e) {
+        me = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      }
+    }
     document.getElementById('stat-user').textContent = '（用户 ' + me + '）';
 
     // 本页状态（播放器事件 → myState → POST 上报）
@@ -239,8 +252,10 @@
       document.getElementById('seg-p2p').style.width = (p2p / total * 100) + '%';
       document.getElementById('seg-http').style.width = (http / total * 100) + '%';
 
-      // 在线数（卡片：只显示数字，"人"单位在 spd-unit）
-      document.getElementById('users-online').textContent = users.length;
+      // 在线数：真实 P2P 连接人数（tracker swarm，按当前视频 infoHash；不是打开页面数）
+      // 刷新 = 旧 WS 断开 + 新 WS 建立 → 人数不变；无 infoHash（纯 HTTP 演示）显示 --
+      var sw = (data.swarms && myState.infoHash) ? data.swarms[myState.infoHash] : null;
+      document.getElementById('users-online').textContent = sw ? sw.count : '--';
     }
 
     function startPlayer() {
@@ -317,6 +332,7 @@
               var v = data.video;
               playerMagnet = v.magnetURI || videoMagnet;
               playerTorrentUrl = v.torrentUrl || videoTorrent;
+              myState.infoHash = v.infoHash || '';   // 用于查询真实 P2P 在线人数（tracker swarm）
               // tracker：合并去重 = API trackers + ?tracker= 参数 + 兜底（自建 + 公共 wss，始终补充）
               var TRACKERS_FALLBACK = ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com'];
               var apiTrackers = (v.trackers && v.trackers.length) ? v.trackers

@@ -17,6 +17,7 @@ const httpMedia = require('./http-media')
 const nodesApi = require('./nodes-api')
 const torrent = require('./torrent-service')
 const videoService = require('./video-service')
+const trackerSwarm = require('./tracker-swarm')
 const { createSignaling } = require('./signaling')
 
 const ROOT = path.join(__dirname, '..') // 仓库根
@@ -107,7 +108,10 @@ const server = http.createServer((req, res) => {
       for (const [k, v] of statsStore) {
         if (now - v.updatedAt > 30000) statsStore.delete(k) // 30s 未上报视为离线
       }
-      const users = Array.from(statsStore.values()).sort((a, b) => (a.user || '').localeCompare(b.user || ''))
+      // 在线人数口径：只统计有实际播放/下载活动的用户（打开未播放、刷新残留的僵尸页面剔除）
+      const users = Array.from(statsStore.values())
+        .filter((u) => (u.p2pBlocks || 0) + (u.httpBlocks || 0) > 0 || (u.progress || 0) > 0)
+        .sort((a, b) => (a.user || '').localeCompare(b.user || ''))
       const agg = users.reduce(
         (a, u) => {
           a.p2pBlocks += u.p2pBlocks || 0
@@ -124,7 +128,7 @@ const server = http.createServer((req, res) => {
       const total = agg.p2pBlocks + agg.httpBlocks
       agg.p2pRatio = total ? +((agg.p2pBlocks / total) * 100).toFixed(1) : 0
       res.setHeader('Content-Type', 'application/json')
-      res.end(JSON.stringify({ users, aggregate: agg, ts: now }))
+      res.end(JSON.stringify({ users, aggregate: agg, swarms: trackerSwarm.snapshot(), ts: now }))
       return
     }
     res.statusCode = 405
@@ -344,5 +348,19 @@ server.listen(config.httpPort, () => {
   console.log(`[http] player page:  http://${config.sourceHost}:${config.httpPort}/`)
   console.log(`[http] media root:   ${config.mediaRoot}`)
 })
+
+// 真实 P2P 在线人数：定时 scrape 自建 wss tracker，刷新各视频 swarm（complete + incomplete）
+function refreshSwarmStats() {
+  const videos = videoService.listVideos()
+  const hashes = videos.map((v) => v.infoHash).filter((h) => h && h.length === 40)
+  if (hashes.length === 0) return
+  hashes.forEach((h) => {
+    trackerSwarm.refresh(h).then((r) => {
+      if (r) console.log(`[swarm] ${h.slice(0, 8)}… complete=${r.complete} incomplete=${r.incomplete} peers=${r.count}`)
+    }).catch(() => {})
+  })
+}
+setInterval(refreshSwarmStats, trackerSwarm.REFRESH_MS)
+refreshSwarmStats()
 
 module.exports = { server, wss }
