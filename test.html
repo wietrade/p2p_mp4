@@ -35,21 +35,10 @@
   <h3>🧪 PearPlayer 功能测试台</h3>
   <div class="sub">测试：视频注册（url + magnet）、.torrent 引导（local / xs / downloadmeta）、节点 API、播放。页面：<span class="mono">http://127.0.0.1:8000/test.html</span></div>
 
-  <!-- ① 注册表单 -->
+  <!-- ① 示例视频（自动注册，无需用户干预） -->
   <section>
-    <h4>① 视频注册（POST /v1/videos）</h4>
-    <label>视频 URL（HTTP 外链）</label>
-    <input id="in-url" type="text" placeholder="https://bot3.1230sb.com/bbb.mp4">
-    <label>磁力链接 magnet</label>
-    <input id="in-magnet" type="text" placeholder="magnet:?xt=urn:btih:...&dn=...">
-    <label>BitTorrent 种子文件地址（.torrent 外链，如 GitHub；可选，无则靠磁力 metadata 交换）</label>
-    <input id="in-torrent" type="text" placeholder="https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent">
-    <div class="row">
-      <button onclick="doRegister()">注册</button>
-      <button class="sec" onclick="fillBbb()">填充 bbb 示例</button>
-      <button class="sec" onclick="fillKaltura()">填充 kaltura 示例</button>
-    </div>
-    <pre id="reg-result">（注册结果将显示在这里，含 metaSource / hasTorrent / torrentUrl）</pre>
+    <h4>① 示例视频（kaltura 100MB，加载时自动注册）</h4>
+    <pre id="reg-result">自动注册中…（后端下载种子 → 解析 → 托管）</pre>
   </section>
 
   <!-- ② 已注册视频列表 -->
@@ -65,8 +54,7 @@
   <section>
     <h4>③ 播放测试（iframe 内嵌播放页）</h4>
     <div class="row">
-      <button class="sec" onclick="openPlayer()">用当前表单打开播放页</button>
-      <button class="sec" onclick="loadFirstPlayer()">播放列表第一个</button>
+      <button class="sec" onclick="loadFirstPlayer()">▶ 播放列表第一个</button>
     </div>
     <iframe id="player" src="about:blank" title="播放器预览"></iframe>
   </section>
@@ -89,37 +77,32 @@
       $('reg-result').textContent = text + JSON.stringify(obj || {}, null, 2)
     }
 
-    // ① 注册（自动完成：后端下载种子 → 解析校验 → 托管 → 返回 GitHub 下载地址；tracker/name 自动）
-    function doRegister() {
-      var url = $('in-url').value.trim()
-      var magnet = $('in-magnet').value.trim()
-      var torrent = $('in-torrent').value.trim()
-      if (!url || !magnet) { showResult('请填写 url 和 magnet。\n'); return }
-      showResult('注册中…（后端自动：下载种子 → 解析 → 托管）\n')
-      var body = { url: url, magnet: magnet }
-      if (torrent) body.torrentUrl = torrent
-      api('/v1/videos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+    // ① 自动注册（用户无需干预：GET 已注册则直接显示，否则 POST 自动注册）
+    function autoRegister(video) {
+      showResult('自动注册中…（后端下载种子 → 解析 → 托管）\n')
+      api('/v1/videos?url=' + encodeURIComponent(video.url)).then(function (r) {
+        if (r.video) return r
+        return api('/v1/videos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(video)
+        })
       }).then(function (r) {
-        var prefix = ''
         if (r.video && r.video.torrentUrl) {
-          // 验证 /boot/ 托管可访问
+          // 验证种子外链（GitHub）可访问
           return fetch(r.video.torrentUrl).then(function (hr) {
-            prefix = 'torrentUrl 可访问: ' + hr.status + ' ' + hr.statusText +
-              ' (' + (hr.headers.get('content-length') || '?') + ' bytes)\n'
-            showResult(prefix, r)
+            showResult('✅ ' + (r.video.name || '') + ' 已就绪（自动注册） | 种子外链可访问: ' + hr.status + '\n', r.video)
             loadList()
           }).catch(function () {
-            showResult('torrentUrl 访问失败。\n', r)
+            showResult('✅ ' + (r.video.name || '') + ' 已就绪（自动注册） | 种子外链访问失败\n', r.video)
             loadList()
           })
         }
-        showResult(prefix, r)
+        showResult('✅ 已就绪（自动注册）\n', r.video)
         loadList()
       }).catch(function (e) {
-        showResult('注册失败: ' + e.message + '\n')
+        showResult('自动注册失败: ' + e.message + '\n')
+        loadList()
       })
     }
 
@@ -164,14 +147,6 @@
 
     // ③ 播放器（tracker/torrent 由播放页从后端 API 自动获取，无需手填）
     function setPlayer(url) { $('player').src = url }
-    function openPlayer() {
-      var url = $('in-url').value.trim()
-      var magnet = $('in-magnet').value.trim()
-      var torrent = $('in-torrent').value.trim()
-      if (!url) { return }
-      setPlayer(playerUrl('url=' + encodeURIComponent(url) + '&magnet=' + encodeURIComponent(magnet) +
-        (torrent ? '&torrent=' + encodeURIComponent(torrent) : '')))
-    }
     function loadFirstPlayer() {
       api('/v1/videos').then(function (r) {
         var v = (r.videos || [])[0]
@@ -182,21 +157,13 @@
       })
     }
 
-    // 示例填充（用户只需 url + magnet + 种子地址）
-    function fillBbb() {
-      $('in-url').value = 'https://bot3.1230sb.com/bbb.mp4'
-      $('in-magnet').value = 'magnet:?xt=urn:btih:99b2abd7b2ac02270b20b8c3f3634dea77db497e&dn=bbb.mp4'
-      $('in-torrent').value = 'https://wietrade.github.io/p2p_mp4/torrents/bbb.mp4.torrent'
+    // ===== 自动注册示例（kaltura 100MB，无需用户干预）=====
+    var DEMO = {
+      url: 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4',
+      magnet: 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4',
+      torrentUrl: 'https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent'
     }
-    function fillKaltura() {
-      $('in-url').value = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4'
-      $('in-magnet').value = 'magnet:?xt=urn:btih:ef9cfc0fa65744edf4cd6cd3256cf805b86c7822&dn=kaltura.mp4'
-      $('in-torrent').value = 'https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent'
-    }
-
-    // 默认预填大文件（kaltura 100MB）
-    fillKaltura()
-    loadList()
+    autoRegister(DEMO)
   </script>
 </body>
 </html>
