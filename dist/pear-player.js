@@ -29161,6 +29161,19 @@ Dispatcher.prototype._setupHttp = function (hd) {
             // （webtorrent 内部自建 bitfield，与 dispatcher.bitfield 相互独立）
             if (self.torrent && self.torrent.bitfield) {
                 self.torrent.bitfield.set(index, true);
+                // 核心混合传输（与 webtorrent 原生逻辑一致，见 torrent.js _onPiece）：
+                // webtorrent 以 pieces[index] === null 作为“块已下载完成、可分享”的判定，
+                // 响应 peer 请求时 if (self.pieces[index]) return —— 不置 null 则拒绝响应（上传恒为 0）。
+                // 完整链路 = pieces=null（可分享）+ bitfield（告知）+ store（数据）+ have（广播增量）
+                if (self.torrent.pieces && self.torrent.pieces[index]) {
+                    self.torrent.pieces[index] = null;
+                }
+                if (self.torrent.wires) {
+                    for (var wi = 0; wi < self.torrent.wires.length; wi++) {
+                        var ww = self.torrent.wires[wi];
+                        if (ww && ww.have) { try { ww.have(index); } catch (e) {} }
+                    }
+                }
                 self.torrent._checkDone();
             }
 
@@ -29218,6 +29231,17 @@ Dispatcher.prototype._setupDC = function (jd) {
             // 同步到 WebTorrent 的 bitfield（DC 下载的数据也可做种）
             if (self.torrent && self.torrent.bitfield) {
                 self.torrent.bitfield.set(index, true);
+                // 核心混合传输（与 webtorrent 原生逻辑一致）：DC 下载完成的块
+                // pieces[index]=null 标记可分享 + have 广播通知 peer
+                if (self.torrent.pieces && self.torrent.pieces[index]) {
+                    self.torrent.pieces[index] = null;
+                }
+                if (self.torrent.wires) {
+                    for (var wi = 0; wi < self.torrent.wires.length; wi++) {
+                        var ww = self.torrent.wires[wi];
+                        if (ww && ww.have) { try { ww.have(index); } catch (e) {} }
+                    }
+                }
                 self.torrent._checkDone();
             }
 
@@ -34539,9 +34563,30 @@ Worker.prototype._startPlaying = function (nodes) {
             };
             function torrentReady(torrent) {
                 debug('Torrent:', torrent);
+                // 暴露实例供调试/监控（window.__player.torrent / .client）
+                self.torrent = torrent;
+                self.client = client;
                 d.addTorrent(torrent);
                 // 展示实际 tracker 连接列表（种子自带 announce + 前端补充 trackers 合并）
                 self.emit('trackerinfo', torrent.announce || []);
+                // 调试：统计每个 peer wire 的请求/下载状态，定位 P2P 只传几块后停止的问题
+                var wireStats = [];
+                torrent.on('wire', function (wire, addr) {
+                    var stat = { addr: addr, requests: 0, pieces: 0, choked: true, interested: false };
+                    wireStats.push(stat);
+                    if (wireStats.length > 20) wireStats.shift();
+                    debug('wt wire ' + addr);
+                    wire.on('request', function (i, offset, length) {
+                        stat.requests++;
+                        stat.choked = wire.peerChoking;
+                        stat.interested = wire.peerInterested;
+                    });
+                    wire.on('unchoke', function () { stat.choked = false; });
+                    wire.on('choke', function () { stat.choked = true; });
+                    wire.on('piece', function () { stat.pieces++; });
+                    wire.on('close', function () { stat.closed = true; });
+                });
+                self._wireStats = wireStats;
                 // piece 哈希来源：
                 //  - .torrent 直链（torrentUrl）：torrent.torrentFile = 完整 .torrent，立即创建 validator
                 //  - 纯 magnet：torrent.torrentFile = peer 交换来的 metadata buffer
@@ -34579,6 +34624,9 @@ Worker.prototype._startPlaying = function (nodes) {
                 if (self.destroyed) { clearInterval(uploadSpeedTimer); return; }
                 var up = client.uploadSpeed ? client.uploadSpeed / 1024 : 0;
                 self.emit('uploadspeed', up);
+                // 真实 P2P 连接数（本页实际连到的 peer 数 = torrent.wires.length）
+                var pc = (self.torrent && self.torrent.wires) ? self.torrent.wires.length : 0;
+                self.emit('peercount', pc);
             }, 1000);
         }
     });

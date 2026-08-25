@@ -488,6 +488,19 @@ Dispatcher.prototype._setupHttp = function (hd) {
             // （webtorrent 内部自建 bitfield，与 dispatcher.bitfield 相互独立）
             if (self.torrent && self.torrent.bitfield) {
                 self.torrent.bitfield.set(index, true);
+                // 核心混合传输（与 webtorrent 原生逻辑一致，见 torrent.js _onPiece）：
+                // webtorrent 以 pieces[index] === null 作为“块已下载完成、可分享”的判定，
+                // 响应 peer 请求时 if (self.pieces[index]) return —— 不置 null 则拒绝响应（上传恒为 0）。
+                // 完整链路 = pieces=null（可分享）+ bitfield（告知）+ store（数据）+ have（广播增量）
+                if (self.torrent.pieces && self.torrent.pieces[index]) {
+                    self.torrent.pieces[index] = null;
+                }
+                if (self.torrent.wires) {
+                    for (var wi = 0; wi < self.torrent.wires.length; wi++) {
+                        var ww = self.torrent.wires[wi];
+                        if (ww && ww.have) { try { ww.have(index); } catch (e) {} }
+                    }
+                }
                 self.torrent._checkDone();
             }
 
@@ -545,6 +558,17 @@ Dispatcher.prototype._setupDC = function (jd) {
             // 同步到 WebTorrent 的 bitfield（DC 下载的数据也可做种）
             if (self.torrent && self.torrent.bitfield) {
                 self.torrent.bitfield.set(index, true);
+                // 核心混合传输（与 webtorrent 原生逻辑一致）：DC 下载完成的块
+                // pieces[index]=null 标记可分享 + have 广播通知 peer
+                if (self.torrent.pieces && self.torrent.pieces[index]) {
+                    self.torrent.pieces[index] = null;
+                }
+                if (self.torrent.wires) {
+                    for (var wi = 0; wi < self.torrent.wires.length; wi++) {
+                        var ww = self.torrent.wires[wi];
+                        if (ww && ww.have) { try { ww.have(index); } catch (e) {} }
+                    }
+                }
                 self.torrent._checkDone();
             }
 

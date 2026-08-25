@@ -565,9 +565,30 @@ Worker.prototype._startPlaying = function (nodes) {
             };
             function torrentReady(torrent) {
                 debug('Torrent:', torrent);
+                // 暴露实例供调试/监控（window.__player.torrent / .client）
+                self.torrent = torrent;
+                self.client = client;
                 d.addTorrent(torrent);
                 // 展示实际 tracker 连接列表（种子自带 announce + 前端补充 trackers 合并）
                 self.emit('trackerinfo', torrent.announce || []);
+                // 调试：统计每个 peer wire 的请求/下载状态，定位 P2P 只传几块后停止的问题
+                var wireStats = [];
+                torrent.on('wire', function (wire, addr) {
+                    var stat = { addr: addr, requests: 0, pieces: 0, choked: true, interested: false };
+                    wireStats.push(stat);
+                    if (wireStats.length > 20) wireStats.shift();
+                    debug('wt wire ' + addr);
+                    wire.on('request', function (i, offset, length) {
+                        stat.requests++;
+                        stat.choked = wire.peerChoking;
+                        stat.interested = wire.peerInterested;
+                    });
+                    wire.on('unchoke', function () { stat.choked = false; });
+                    wire.on('choke', function () { stat.choked = true; });
+                    wire.on('piece', function () { stat.pieces++; });
+                    wire.on('close', function () { stat.closed = true; });
+                });
+                self._wireStats = wireStats;
                 // piece 哈希来源：
                 //  - .torrent 直链（torrentUrl）：torrent.torrentFile = 完整 .torrent，立即创建 validator
                 //  - 纯 magnet：torrent.torrentFile = peer 交换来的 metadata buffer
@@ -605,6 +626,9 @@ Worker.prototype._startPlaying = function (nodes) {
                 if (self.destroyed) { clearInterval(uploadSpeedTimer); return; }
                 var up = client.uploadSpeed ? client.uploadSpeed / 1024 : 0;
                 self.emit('uploadspeed', up);
+                // 真实 P2P 连接数（本页实际连到的 peer 数 = torrent.wires.length）
+                var pc = (self.torrent && self.torrent.wires) ? self.torrent.wires.length : 0;
+                self.emit('peercount', pc);
             }, 1000);
         }
     });

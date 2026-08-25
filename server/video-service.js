@@ -296,10 +296,12 @@ async function registerWithMagnet(url, id, magnet, name, torrentUrl) {
     }
   }
 
-  // trackers：种子自带 announce + 配置补充（去重）
+  // trackers：仅保留 WebSocket tracker（ws/wss）——浏览器 WebTorrent 只认 wss（http/udp 在
+  // 浏览器被 bittorrent-tracker 禁用，见其 package.json browser 字段）；
+  // 种子的 http/udp 仍保留在种子/magnet 里供 Node seeder / 传统 BT 客户端使用。
   const trackers = []
   for (const t of seedAnnounce.concat(config.webTorrentTrackers || [])) {
-    if (t && trackers.indexOf(t) === -1) trackers.push(t)
+    if (t && /^wss?:\/\//.test(t) && trackers.indexOf(t) === -1) trackers.push(t)
   }
 
   // 3. 注册
@@ -366,11 +368,11 @@ async function registerWithTorrentUrl(url, id, name, torrentUrl) {
   const saved = saveTorrent(buf)
   const parsedName = saved ? saved.name : parsed.name
 
-  // 5. 注册
+  // 5. 注册（trackers 仅保留 wss，浏览器 WebTorrent 只认 ws/wss）
   const trackers = []
   const seedAnnounce = Array.isArray(parsed.announce) ? parsed.announce : []
   for (const t of seedAnnounce.concat(config.webTorrentTrackers || [])) {
-    if (t && trackers.indexOf(t) === -1) trackers.push(t)
+    if (t && /^wss?:\/\//.test(t) && trackers.indexOf(t) === -1) trackers.push(t)
   }
   const info = {
     id,
@@ -428,9 +430,10 @@ async function registerHttpOnly(url, id, name) {
   return info
 }
 
-/** 返回时补全 trackers：合并当前 config 的 tracker（兼容旧注册记录持久化的旧 trackers） */
+/** 返回时补全 trackers：合并当前 config 的 tracker（兼容旧注册记录持久化的旧 trackers）。
+ *  仅保留 ws/wss（浏览器 WebTorrent 唯一有效的 tracker 协议） */
 function withTrackers(v) {
-  const list = (Array.isArray(v.trackers) ? v.trackers : []).slice()
+  const list = (Array.isArray(v.trackers) ? v.trackers : []).filter((t) => /^wss?:\/\//.test(t))
   for (const t of config.webTorrentTrackers || []) {
     if (t && list.indexOf(t) === -1) list.push(t)
   }
