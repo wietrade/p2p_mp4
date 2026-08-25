@@ -145,7 +145,8 @@
     }
 
     // ===== 统计面板（API 方式：POST /v1/stats 上报 → 后端聚合 → GET 轮询渲染） =====
-    var me = new URLSearchParams(location.search).get('user') || '1';
+    // 每个页面唯一 id（避免多页面 url 相同 → id 相同 → stats 互相覆盖）
+    var me = new URLSearchParams(location.search).get('user') || ('u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
     document.getElementById('stat-user').textContent = '（用户 ' + me + '）';
 
     // 本页状态（播放器事件 → myState → POST 上报）
@@ -200,11 +201,13 @@
       for (var i = 0; i < users.length; i++) {
         if (users[i].user === me) { mine = users[i]; break; }
       }
-      var u = mine || data.aggregate || {};
+      // 只显示本页数据（避免其它同 id 页面/聚合数据误导）；上报失败时全 0
+      var u = mine || {};
 
-      // 速度区（3 张卡片）
-      setSpeed('spd-http', 'unit-http', u.httpSpeed);
-      setSpeed('spd-p2p-dl', 'unit-p2p-dl', u.p2pDlSpeed);
+      // 本页已下载完成 → 下载速度归零（避免残留窗口值误导）
+      var done = (u.progress || 0) >= 100;
+      setSpeed('spd-http', 'unit-http', done ? 0 : u.httpSpeed);
+      setSpeed('spd-p2p-dl', 'unit-p2p-dl', done ? 0 : u.p2pDlSpeed);
       setSpeed('spd-p2p-up', 'unit-p2p-up', u.p2pUpSpeed);
 
       // 块统计

@@ -119,8 +119,7 @@
       api('/v1/videos').then(function (r) {
         var rows = (r.videos || []).map(function (v) {
           var id = encodeURIComponent(v.id)
-          var play = playerUrl('user=' + v.id +
-            '&url=' + encodeURIComponent(v.url) +
+          var play = playerUrl('url=' + encodeURIComponent(v.url) +
             '&magnet=' + encodeURIComponent(v.magnetURI || '') +
             (v.torrentUrl ? '&torrent=' + encodeURIComponent(v.torrentUrl) : '') +
             (v.trackers && v.trackers.length ? '&tracker=' + encodeURIComponent(v.trackers.join(',')) : ''))
@@ -153,7 +152,7 @@
     function loadFirstPlayer() {
       api('/v1/videos').then(function (r) {
         var v = (r.videos || [])[0]
-        if (v) setPlayer(playerUrl('user=' + v.id + '&url=' + encodeURIComponent(v.url) +
+        if (v) setPlayer(playerUrl('url=' + encodeURIComponent(v.url) +
           '&magnet=' + encodeURIComponent(v.magnetURI || '') +
           (v.torrentUrl ? '&torrent=' + encodeURIComponent(v.torrentUrl) : '') +
           (v.trackers && v.trackers.length ? '&tracker=' + encodeURIComponent(v.trackers.join(',')) : '')))
