@@ -195,9 +195,12 @@
     // 每 2 秒：计算速度 → POST 上报 → GET 拉取 → 渲染面板
     function syncStats() {
       function calc(arr) {
+        if (!arr.length) return 0;
         var total = 0;
         for (var i = 0; i < arr.length; i++) total += arr[i].bytes;
-        return total / 3; // 3 秒窗口 → bytes/s
+        // 按实际窗口时间跨度计算（避免启动初期窗口不满、除以固定 3 导致速度低估）
+        var span = (arr[arr.length - 1].t - arr[0].t) / 1000;
+        return span <= 0 ? total : total / span;  // 单样本 = 即时速率
       }
       myState.httpSpeed = calc(speedLog.HTTP);
       myState.p2pDlSpeed = calc(speedLog.P2P);
