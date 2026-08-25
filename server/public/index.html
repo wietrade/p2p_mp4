@@ -217,9 +217,10 @@
         if (!arr.length) return 0;
         var total = 0;
         for (var i = 0; i < arr.length; i++) total += arr[i].bytes;
-        // 按实际窗口时间跨度计算（避免启动初期窗口不满、除以固定 3 导致速度低估）
+        // 按实际窗口时间跨度计算；单样本时按窗口上限（3s）估算，
+        // 避免把整块字节数直接当"每秒速度"虚高（如 512KB 块显示成 512KB/s）
         var span = (arr[arr.length - 1].t - arr[0].t) / 1000;
-        return span <= 0 ? total : total / span;  // 单样本 = 即时速率
+        return span > 0 ? total / span : total / 3;
       }
       myState.httpSpeed = calc(speedLog.HTTP);
       myState.p2pDlSpeed = calc(speedLog.P2P);
