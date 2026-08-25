@@ -93,13 +93,16 @@
           return fetch(r.video.torrentUrl).then(function (hr) {
             showResult('✅ ' + (r.video.name || '') + ' 已就绪（自动注册） | 种子外链可访问: ' + hr.status + '\n', r.video)
             loadList()
+            loadFirstPlayer()   // 自动播放第一个
           }).catch(function () {
             showResult('✅ ' + (r.video.name || '') + ' 已就绪（自动注册） | 种子外链访问失败\n', r.video)
             loadList()
+            loadFirstPlayer()
           })
         }
         showResult('✅ 已就绪（自动注册）\n', r.video)
         loadList()
+        loadFirstPlayer()
       }).catch(function (e) {
         showResult('自动注册失败: ' + e.message + '\n')
         loadList()
