@@ -325,7 +325,7 @@
               playerMagnet = v.magnetURI || videoMagnet;
               playerTorrentUrl = v.torrentUrl || videoTorrent;
               // tracker：合并去重 = API trackers + ?tracker= 参数 + 公共兜底（始终补充，最大化 peer 发现面）
-              var TRACKERS_FALLBACK = ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xyz'];
+              var TRACKERS_FALLBACK = ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com'];
               var apiTrackers = (v.trackers && v.trackers.length) ? v.trackers
                 : (videoTrackers ? videoTrackers.split(',').filter(function (t) { return t }) : []);
               playerTrackers = [];
