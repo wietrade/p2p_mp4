@@ -1,8 +1,8 @@
 # PearPlayer 外链视频 Web 播放方案（HTTP + P2P 双通道）
 
-给任意 **HTTP 外链视频 + 磁力 hash**，浏览器用户打开一个播放页即可实现 **HTTP 直连 + WebRTC P2P 双通道播放**，下载完自动做种。数据全部在用户端互相分享，服务端只负责注册、生成/托管 `.torrent` 与 tracker 协调。
+给任意 **HTTP 外链视频 + .torrent 种子直链**（站长提供），浏览器用户打开一个播放页即可实现 **HTTP 直连 + WebRTC P2P 双通道播放**，下载完自动做种。**magnet 由后端从种子自动解析**（站长无需提供磁力）。数据全部在用户端互相分享，服务端只负责注册、解析/托管 `.torrent` 与 tracker 协调（**零视频上行**）。
 
-基于 [PearPlayer.js](https://github.com/PearInc/PearPlayer.js)（MIT）二次开发：修复了 5 个播放器 bug，扩展了「外链 + magnet」次级方案，并自建 Node 后端。
+基于 [PearPlayer.js](https://github.com/PearInc/PearPlayer.js)（MIT）二次开发：修复了 5 个播放器 bug，扩展了「HTTP 外链 + 种子直链」方案，并自建 Node 后端。
 
 ---
 
@@ -49,18 +49,18 @@ http://127.0.0.1:8000/test.html
 或直接打开播放页：
 
 ```
-http://127.0.0.1:8000/?url=<外链>&magnet=<磁力>&torrent=<.torrent地址>&tracker=<tracker服务器>
+http://127.0.0.1:8000/?url=<外链>&torrent=<.torrent种子直链>&tracker=<tracker服务器>
 ```
 
-四个参数均可省略，后端会通过 API 补齐（`magnetURI` / `torrentUrl` / `trackers`）。
+**站长只需提供 `url` + `torrent` 两个参数**，magnet 由后端从种子自动解析（无需手填）。
 
 ### 播放器参数（`?` 查询串）
 
 | 参数 | 说明 | 必填 |
 |:--|:--|:--:|
-| `url` | HTTP 视频外链 | ✅ |
-| `magnet` | 磁力链接（btih），P2P 通道 | ⚠️ 无则纯 HTTP |
-| `torrent` | `.torrent` 直链（有则立即引导，无需等 peer 交换 metadata） | 可选 |
+| `url` | HTTP 视频外链 | ✅ 必要 |
+| `torrent` | `.torrent` 种子直链（站长提供，P2P 必需） | ⚠️ 无则**纯 HTTP** |
+| `magnet` | 磁力链接（可选；后端有 torrent 时自动从种子解析，无需手填） | 可选 |
 | `tracker` | tracker 服务器，**逗号分隔多地址**（API 返回的 trackers 优先） | 可选 |
 
 ---
@@ -80,18 +80,20 @@ http://127.0.0.1:8000/?url=<外链>&magnet=<磁力>&torrent=<.torrent地址>&tra
 | `/health` | GET | 健康检查（进程守护/监控用，返回已注册数） |
 | `/` `/test.html` `/metadata.html` `/seed.html` | GET | 播放页 / 测试台 / metadata 引导页 / 做种页 |
 
-### `.torrent` 引导（后端职责核心，可靠性排序）
+### `.torrent` 引导与 magnet 解析（后端职责核心）
 
-种子文件放在 **GitHub Pages 静态托管**（如 `https://wietrade.github.io/p2p_mp4/torrents/`），服务器注册时从 GitHub **远程下载 → 服务端解析校验**；前端也从 GitHub 外链下载种子（免费、快）。
+**站长只需提供 `url`（视频直链）+ `torrent`（.torrent 种子直链）**；后端**不下载视频**，只下载几 KB 的种子并**用代码解析出 magnet**（infoHash + 种子自带 announce）。
 
 ```
-注册流程（用户只需 url + magnet + 种子地址）：
-POST /v1/videos {url, magnet, torrentUrl}
-  → 服务器按可靠性顺序获取 .torrent：
-     ① 本地已有（torrents/ 缓存）            → metaSource: local
-     ② torrentUrl / 磁力 xs= 直链（GitHub）   → 下载+解析校验 infoHash → metaSource: xs
-     ③ 都没有 → 从 peer 交换 metadata         → metaSource: downloadmeta（best effort）
-  → 解析成功：托管 + 返回 torrentUrl（GitHub 地址）
+注册流程（站长提供 url + torrent 种子直链）：
+POST /v1/videos {url, torrentUrl, magnet?}
+  ├─ 有 magnet      → 解析磁力（infoHash 复用优先）→ metaSource: local / xs / downloadmeta
+  ├─ 无 magnet 有 torrentUrl
+  │                  → 下载 .torrent（几 KB）→ 代码解析出 magnet/infoHash
+  │                    → 托管 torrents/ → 返回 torrentUrl（GitHub 地址）
+  └─ 都无            → 纯 HTTP 注册（hasTorrent:false，播放器仅 HTTP，无 P2P）
+
+以种子为中心：同 infoHash 已处理过 → 直接复用（无论 url 怎么变）
 ```
 
 ---
@@ -103,7 +105,8 @@ pearplayer/
 ├─ server/                       # ← 后端（Node 服务）
 │  ├─ index.js                   # 入口：HTTP 8000 + WS 8001 + 全部路由
 │  ├─ config.js                  # 端口 / 媒体 / tracker / 节点 / PEAR_* 配置
-│  ├─ video-service.js           # 视频注册（url+magnet）、HEAD 拿 size、.torrent 托管/引导
+│  ├─ video-service.js           # 视频注册（url+torrent→解析magnet / 纯HTTP）、.torrent 托管
+│  ├─ tracker-swarm.js           # 真实 P2P 在线人数探针（wss tracker scrape，不污染 swarm）
 │  ├─ nodes-api.js               # 节点 API（PearPlayer 协议：magnet/size）
 │  ├─ http-media.js              # 媒体服务 + 回源代理 proxyRequest
 │  ├─ media.js                   # 媒体路径解析（剥 {host:port} 前缀）
@@ -133,8 +136,8 @@ pearplayer/
 
 | 页面 | 作用 |
 |:--|:--|
-| `index.html` | 播放页：统计面板 + `?url=&magnet=&torrent=&tracker=` 自动注册/播放 |
-| `test.html` | **功能测试台**：注册 / 引导来源 / 节点 API / iframe 播放 |
+| `index.html` | 播放页：统计面板（速度/块数本地实时渲染 + 在线人数=真实 P2P swarm）+ 自动注册/播放 |
+| `test.html` | **功能测试台**：url（必要）+ torrent（站长提供，P2P 必需）输入，自动注册 / iframe 播放 |
 | `metadata.html` | 浏览器端 metadata 引导（无 `.torrent` 时兜底） |
 | `seed.html` | 浏览器做种页（可并入播放页） |
 | `webtorrent.min.js` | WebTorrent 浏览器 bundle |
@@ -179,13 +182,33 @@ npm run build-player          # → dist/pear-player.js
 | 后端 API | `https://bot3.1230sb.com/p2p_mp4/` | nginx `location ^~ /p2p_mp4/` 反代 → `127.0.0.1:8000` |
 | Tracker | `wss://bot3.1230sb.com/tracker` | wt-tracker docker :8083 |
 
+### 部署命令
+
+```powershell
+# 前端（GitHub Pages）：同步 server/public + dist + torrents → deploy/p2p_mp4 并推送
+npm run deploy
+cd deploy/p2p_mp4 && git add -A && git commit -m "..." && git push origin main
+
+# 后端（43）：scp 修改的 server 文件 → 重启（例：改动 index.js / video-service.js）
+scp -i I:\1H\43.165.167.132_id_ed25519 server/index.js server/video-service.js `
+  root@43.165.167.132:/www/wwwroot/bot3.1230sb.com/p2p_mp4/
+ssh -i I:\1H\43.165.167.132_id_ed25519 root@43.165.167.132 '
+  fuser -k 8003/tcp 2>/dev/null; sleep 1;
+  cd /www/wwwroot/bot3.1230sb.com/p2p_mp4 && \
+  PEAR_FOG_COUNT=0 PEAR_NO_NODES=1 PEAR_WS_PORT=8003 \
+  PEAR_PUBLIC_BASE="https://bot3.1230sb.com/p2p_mp4" \
+  PEAR_TORRENT_BASE="https://wietrade.github.io/p2p_mp4/torrents" \
+  PEAR_SOURCE_HOST="bot3.1230sb.com" PEAR_SOURCE_PORT=443 \
+  nohup node index.js > /tmp/p2p-server.log 2>&1 < /dev/null & sleep 3; tail -3 /tmp/p2p-server.log'
+```
+
 ### 部署注意
 
 1. **前端页面必须用相对路径**（`./pear-player.js`、`./?`），兼容 GitHub Pages 子目录
 2. 后端启动环境变量：`PEAR_FOG_COUNT=0`（无 Fog）、`PEAR_NO_NODES=1`（零 HTTP 节点）、`PEAR_PUBLIC_BASE=https://bot3.1230sb.com/p2p_mp4`（API 公网）、`PEAR_TORRENT_BASE=https://wietrade.github.io/p2p_mp4/torrents`（种子 GitHub 地址）
 3. nginx 反代用 `location ^~ /p2p_mp4/`（`^~` 避免被 `.js` 正则 location 抢走）
 4. 后端 CORS：`/v1/*`、`/boot/`、媒体均已 `Access-Control-Allow-Origin: *`
-5. 视频**不存服务器**：注册时只需 url + magnet，`.torrent` 由服务器托管（几 KB）；HTTP 通道用户直连外链 CDN
+5. 视频**不存服务器**：站长提供 `url` + `.torrent` 种子直链，后端只下载/托管几 KB 种子（magnet 由代码解析）；HTTP 通道用户直连外链 CDN
 6. 服务端职责最小化：注册、`.torrent`、tracker；**零视频上行**
 7. **多 tracker 并行**：自建 + `wss://tracker.openwebtorrent.com`（浏览器 P2P）；种子另带 `udp://` `http://` 公共 tracker（**兼容 uTorrent 等传统客户端**，它们不支持 wss）
 8. **rtc_config 动态下发**：多 STUN（google/twilio/cloudflare），可选 TURN（`PEAR_TURN_URL/USER/CRED`）
@@ -203,6 +226,7 @@ npm run build-player          # → dist/pear-player.js
 | 纯用户端 P2P（无 seed 页面） | 100MB | 用户 1 做种 → 用户 2 P2P 95.8% |
 | 参数全链路（url+magnet+torrent+tracker） | 100MB | P2P 97.4%（184/189 块） |
 | **外网端到端（GitHub Pages + 43 后端）** | 100MB | P2P 94.9%（75/79 块），HTTP 直连 CDN（mac=vodcdn） |
+| **站长方案（url + torrent 直链，magnet 代码解析）** | 100MB | P2P 97.4%（187/192 块）；无 torrent → 纯 HTTP；在线人数=真实 swarm（刷新不虚增） |
 
 ---
 
