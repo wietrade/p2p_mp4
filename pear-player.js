@@ -36011,6 +36011,8 @@ Worker.prototype._startPlaying = function (nodes) {
             function torrentReady(torrent) {
                 debug('Torrent:', torrent);
                 d.addTorrent(torrent);
+                // 展示实际 tracker 连接列表（种子自带 announce + 前端补充 trackers 合并）
+                self.emit('trackerinfo', torrent.announce || []);
                 // piece 哈希来源：
                 //  - .torrent 直链（torrentUrl）：torrent.torrentFile = 完整 .torrent，立即创建 validator
                 //  - 纯 magnet：torrent.torrentFile = peer 交换来的 metadata buffer

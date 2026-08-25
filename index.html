@@ -265,6 +265,7 @@
         else if (type === 'HTTP_Server' || type === 'HTTP_Node') { myState.httpBlocks++; myState.httpBytes += size; recordSpeed('HTTP', size); }
       });
       player.on('uploadspeed', function (kb) { uploadKBs = kb || 0; });
+      player.on('trackerinfo', function (list) { log('🔗 tracker 连接: ' + (list && list.length ? list.join(', ') : '无（种子无 announce）'), 'ok'); });
       player.on('datachannelerror', function () { log('datachannel error（无 Fog 节点时正常）', 'warn'); });
       player.on('httperror', function () { log('http error', 'err'); });
       player.on('exception', function (e) { log('exception: ' + JSON.stringify(e), 'err'); });
