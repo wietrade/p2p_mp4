@@ -244,10 +244,10 @@
       document.getElementById('bar-prog').style.width = prog + '%';
       document.getElementById('num-prog').textContent = prog.toFixed(1) + '%';
 
-      // 堆叠条（占总块比例）
-      var total = u.totalChunks || 1;
-      document.getElementById('seg-p2p').style.width = (p2p / total * 100) + '%';
-      document.getElementById('seg-http').style.width = (http / total * 100) + '%';
+      // 堆叠条：固定满宽，内部按来源占比着色（P2P 绿 vs HTTP 黄），与进度条解耦（不重复）
+      var srcSum = p2p + http;
+      document.getElementById('seg-p2p').style.width = (srcSum ? (p2p / srcSum * 100) : 0) + '%';
+      document.getElementById('seg-http').style.width = (srcSum ? (http / srcSum * 100) : 0) + '%';
 
       // 在线数（卡片：只显示数字，"人"单位在 spd-unit）
       document.getElementById('users-online').textContent = users.length;
