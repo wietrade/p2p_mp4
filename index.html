@@ -252,8 +252,10 @@
       document.getElementById('seg-p2p').style.width = (p2p / total * 100) + '%';
       document.getElementById('seg-http').style.width = (http / total * 100) + '%';
 
-      // 在线数（卡片：只显示数字，"人"单位在 spd-unit）
-      document.getElementById('users-online').textContent = users.length;
+      // 在线数：真实 P2P 连接人数（tracker swarm，按当前视频 infoHash；不是打开页面数）
+      // 刷新 = 旧 WS 断开 + 新 WS 建立 → 人数不变；无 infoHash（纯 HTTP 演示）显示 --
+      var sw = (data.swarms && myState.infoHash) ? data.swarms[myState.infoHash] : null;
+      document.getElementById('users-online').textContent = sw ? sw.count : '--';
     }
 
     function startPlayer() {
@@ -330,6 +332,7 @@
               var v = data.video;
               playerMagnet = v.magnetURI || videoMagnet;
               playerTorrentUrl = v.torrentUrl || videoTorrent;
+              myState.infoHash = v.infoHash || '';   // 用于查询真实 P2P 在线人数（tracker swarm）
               // tracker：合并去重 = API trackers + ?tracker= 参数 + 兜底（自建 + 公共 wss，始终补充）
               var TRACKERS_FALLBACK = ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com'];
               var apiTrackers = (v.trackers && v.trackers.length) ? v.trackers
