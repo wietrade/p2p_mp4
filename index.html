@@ -324,9 +324,8 @@
               var v = data.video;
               playerMagnet = v.magnetURI || videoMagnet;
               playerTorrentUrl = v.torrentUrl || videoTorrent;
-              // tracker：合并去重 = API trackers + ?tracker= 参数 + 公共兜底（始终补充，最大化 peer 发现面）
-              // 【临时实验】只保留公共 tracker
-              var TRACKERS_FALLBACK = ['wss://tracker.openwebtorrent.com'];
+              // tracker：合并去重 = API trackers + ?tracker= 参数 + 兜底（自建 + 公共 wss，始终补充）
+              var TRACKERS_FALLBACK = ['wss://bot3.1230sb.com/tracker', 'wss://tracker.openwebtorrent.com'];
               var apiTrackers = (v.trackers && v.trackers.length) ? v.trackers
                 : (videoTrackers ? videoTrackers.split(',').filter(function (t) { return t }) : []);
               playerTrackers = [];
