@@ -265,7 +265,7 @@
         interval: 5000,
         useDataChannel: IS_LOCAL,     // 本地 Fog 节点 DataChannel；外网走 WebTorrent（不连本机 WS）
         dataChannels: 10,
-        useTorrent: true,         // 浏览器间 P2P（WebTorrent，走 tracker）
+        useTorrent: !!playerMagnet,  // 有磁力(站长提供种子)才启用 P2P；无种子纯 HTTP
         trackers: playerTrackers,         // tracker 服务器（?tracker= 参数 / API 返回，逗号分隔多地址）
         magnetURI: playerMagnet,          // P2P 磁力（API 注册后返回）
         torrentUrl: playerTorrentUrl,     // .torrent 直链（有则立即引导，无需等 peer 交换 metadata）
@@ -344,7 +344,10 @@
               apiTrackers.concat(TRACKERS_FALLBACK).forEach(function (t) {
                 if (t && !seenTracker[t]) { seenTracker[t] = true; playerTrackers.push(t); }
               });
-              log('✅ 视频就绪: ' + v.name + ' infoHash=' + v.infoHash, 'ok');
+              log('✅ 视频就绪: ' + v.name + ' infoHash=' + (v.infoHash || '无'), 'ok');
+              log((v.hasTorrent && playerMagnet)
+                ? '✅ P2P 已启用（种子就绪）'
+                : '⚠️ 无种子参数 → 仅 HTTP 播放（P2P 需站长提供 .torrent 直链）', (v.hasTorrent && playerMagnet) ? 'ok' : 'warn');
               log('   magnet=' + (v.magnetURI || '').slice(0, 60) + '...', 'ok');
               log('   torrent=' + (playerTorrentUrl || '无（靠磁力 metadata 交换）'), 'ok');
               log('   tracker=' + playerTrackers.join(', '), 'ok');

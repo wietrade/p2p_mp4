@@ -1,8 +1,9 @@
 /**
- * 视频注册/处理服务（双模式）
+ * 视频注册/处理服务（站长提供 HTTP 视频 + 磁力/种子）
  *
- * 【最佳方案】只给 HTTP 链接 → 服务端下载一次 → 生成 torrent/magnet/metadata 引导
- * 【次级方案】HTTP 链接 + 已有磁力 hash → 服务端不下载视频，用 magnet 注册 + metadata 引导
+ * 【P2P 必需】HTTP 视频直链 + 站长提供的磁力（magnet，或 .torrent 直链 xs）
+ *   有磁力 → 服务端不下载视频，解析磁力 → 获取/托管种子 → 播放器 P2P
+ *   无磁力 → 纯 HTTP 注册（不下载生成种子：大文件不可行），播放器仅 HTTP 播放
  *
  * 多个视频：任意数量，各自独立注册
  */
@@ -14,9 +15,6 @@ const crypto = require('crypto')
 const parseTorrentFile = require('parse-torrent-file')
 const config = require('./config')
 const torrentService = require('./torrent-service')
-
-const videosDir = path.join(config.mediaRoot, 'videos')
-fs.mkdirSync(videosDir, { recursive: true })
 
 // 注册表持久化：已注册的视频记录存到 data/videos.json，重启后自动恢复，直接跳过种子处理
 const dataDir = path.join(__dirname, 'data')
@@ -81,45 +79,12 @@ function isPrivateHost(host) {
   )
 }
 
-/** 流式下载 HTTP(S) 视频到 dest，跟随重定向 */
-function download(url, dest) {
-  return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https:') ? https : http
-    const req = mod.get(url, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        res.resume()
-        return download(res.headers.location, dest).then(resolve, reject)
-      }
-      if (res.statusCode !== 200) {
-        res.resume()
-        return reject(new Error('download HTTP ' + res.statusCode))
-      }
-      const ws = fs.createWriteStream(dest)
-      let written = 0
-      res.on('data', (c) => {
-        written += c.length
-        if (written > config.maxDownloadBytes) {
-          // 超过上限：中断并清理已写文件
-          ws.destroy()
-          res.destroy()
-          fs.unlink(dest, () => {})
-          reject(new Error('download too large (limit ' + config.maxDownloadBytes + ' bytes)'))
-        }
-      })
-      res.pipe(ws)
-      ws.on('finish', () => ws.close(resolve))
-      ws.on('error', reject)
-    })
-    req.on('error', reject)
-    req.setTimeout(120000, () => req.destroy(new Error('download timeout')))
-  })
-}
-
 /**
- * 注册一个 HTTP 视频（双模式）
- * @param {string} url HTTP 视频直链
+ * 注册一个 HTTP 视频（P2P 需要站长提供磁力/种子参数）
+ * @param {string} url HTTP 视频直链（必要）
  * @param {string} [name] 可选文件名
- * @param {string} [magnet] 次级方案：已有的磁力链接（提供则不下载视频）
+ * @param {string} [magnet] 磁力链接（站长提供，P2P 必需；提供则不下载视频）
+ * @param {string} [torrentUrl] 外部 .torrent 直链（可选，加速引导）
  */
 async function registerVideo(url, name, magnet, torrentUrl) {
   if (videos.has(url)) return videos.get(url)
@@ -137,7 +102,7 @@ async function registerVideo(url, name, magnet, torrentUrl) {
   const id = crypto.createHash('md5').update(url).digest('hex').slice(0, 10)
 
   if (magnet) {
-    // ===== 次级方案：已有磁力 hash，服务端不下载视频 =====
+    // ===== 有磁力：服务端不下载视频，解析磁力 → 获取/托管种子 → P2P =====
     // 以种子为中心：同一种子（infoHash）已处理过 → 直接复用历史种子处理结果，跳过下载/解析
     const ih = extractInfoHash(magnet)
     if (ih && infoHashes.has(ih)) {
@@ -150,8 +115,12 @@ async function registerVideo(url, name, magnet, torrentUrl) {
     }
     return registerWithMagnet(url, id, magnet, name, torrentUrl)
   }
-  // ===== 最佳方案：服务端下载一次 → 生成种子 =====
-  return registerByDownload(url, name, id, parsedUrl)
+  // ===== 无磁力但有 .torrent 直链（HTTP 格式）：下载种子 → 代码解析出 magnet → P2P =====
+  if (torrentUrl) {
+    return registerWithTorrentUrl(url, id, name, torrentUrl)
+  }
+  // ===== 无种子参数：纯 HTTP 注册（P2P 需站长提供 .torrent 直链） =====
+  return registerHttpOnly(url, id, name)
 }
 
 /** 从 magnet 提取 infoHash（btih） */
@@ -334,35 +303,42 @@ async function registerWithMagnet(url, id, magnet, name, torrentUrl) {
   return info
 }
 
-/** 最佳方案：下载视频 → 生成 torrent/magnet → 注册 */
-async function registerByDownload(url, name, id, parsedUrl) {
-  const baseName = sanitize(name || path.basename(parsedUrl.pathname) || 'video_' + id + '.mp4')
-  const ext = path.extname(baseName) || '.mp4'
-  const base = path.basename(baseName, ext)
-  const rel = 'videos/' + base + '_' + id + ext
-  const full = path.join(config.mediaRoot, rel)
+/** 站长提供 .torrent 直链（HTTP 格式）：下载种子（几 KB，非视频）→ 代码解析出 magnet/infoHash → P2P 注册 */
+async function registerWithTorrentUrl(url, id, name, torrentUrl) {
+  // 1. 下载 .torrent（小文件）并解析
+  let buf, parsed
+  try {
+    buf = await downloadBuffer(torrentUrl)
+    parsed = parseTorrentFile(buf)
+  } catch (e) {
+    throw new Error('torrent 下载/解析失败: ' + ((e && e.message) || e))
+  }
+  if (!parsed || !parsed.infoHash) throw new Error('无效的 .torrent 文件')
+  const infoHash = parsed.infoHash
 
-  // 1. 下载（幂等：已存在则跳过）
-  if (!fs.existsSync(full)) {
-    console.log('[video-service] 下载:', url)
-    await download(url, full)
-    console.log('[video-service] 下载完成:', full, (fs.statSync(full).size / 1024 / 1024).toFixed(1) + 'MB')
+  // 2. 代码从种子解析出 magnet（含 infoHash + 种子自带 announce）
+  const magnet =
+    'magnet:?xt=urn:btih:' + infoHash +
+    '&dn=' + encodeURIComponent(parsed.name || '') +
+    (Array.isArray(parsed.announce) && parsed.announce.length
+      ? parsed.announce.map((t) => '&tr=' + encodeURIComponent(t)).join('')
+      : '')
+
+  // 3. 同一种子已处理过 → 直接复用（以种子为中心）
+  if (infoHashes.has(infoHash)) {
+    const prev = infoHashes.get(infoHash)
+    const info = Object.assign({}, prev, { url, id, registeredAt: Date.now() })
+    videos.set(url, info)
+    saveVideos()
+    console.log('[video-service] 复用已有种子处理记录（infoHash=' + infoHash.slice(0, 12) + '），跳过种子下载')
+    return info
   }
 
-  // 2. 生成 torrent + magnet
-  const size = fs.statSync(full).size
-  const torrentBuf = await torrentService.getTorrent(rel, size)
-  const parsed = parseTorrentFile(torrentBuf)
-  // 落盘 torrent 文件（供 metadata-node 动态扫描 → metadata 引导）
-  const torrentsDir = path.join(__dirname, 'torrents')
-  fs.mkdirSync(torrentsDir, { recursive: true })
-  fs.writeFileSync(path.join(torrentsDir, parsed.name + '.torrent'), torrentBuf)
-  const magnet =
-    'magnet:?xt=urn:btih:' + parsed.infoHash +
-    '&dn=' + encodeURIComponent(parsed.name) +
-    '&tr=wss%3A%2F%2Fbot3.1230sb.com%2Ftracker'
+  // 4. 托管 .torrent（torrents/ 目录，供 /boot/ 下载 + metadata 引导）
+  const saved = saveTorrent(buf)
+  const parsedName = saved ? saved.name : parsed.name
 
-  // 3. 注册
+  // 5. 注册
   const trackers = []
   const seedAnnounce = Array.isArray(parsed.announce) ? parsed.announce : []
   for (const t of seedAnnounce.concat(config.webTorrentTrackers || [])) {
@@ -371,20 +347,56 @@ async function registerByDownload(url, name, id, parsedUrl) {
   const info = {
     id,
     url,
-    rel,
-    localFile: rel,
-    name: parsed.name,
-    size,
-    infoHash: parsed.infoHash,
-    magnetURI: magnet,
+    rel: null,
+    localFile: null,
+    name: name || parsedName,
+    size: null,          // 服务端不下载视频，大小由 HTTP HEAD 获取
+    infoHash,
+    magnetURI: magnet,   // 代码从种子解析生成
+    hasTorrent: true,
+    metaSource: 'xs',
     trackers,
-    torrentUrl: torrentService.torrentUrl(rel),
+    torrentUrl: parsedName
+      ? (config.torrentPublicBase
+          ? config.torrentPublicBase + '/' + encodeURIComponent(parsedName + '.torrent')
+          : (config.publicBase || 'http://' + config.sourceHostWithPort) + '/boot/' + encodeURIComponent(parsedName + '.torrent'))
+      : null,
     registeredAt: Date.now()
   }
   videos.set(url, info)
-  infoHashes.set(parsed.infoHash, info)   // 以种子 hash 为索引，供后续复用
+  infoHashes.set(infoHash, info)   // 以种子 hash 为索引，供后续复用
   saveVideos()
-  console.log('[video-service] 最佳方案注册:', info.name, 'infoHash=' + info.infoHash, 'pieces=' + parsed.pieces.length)
+  console.log('[video-service] 种子直链注册:', info.name, 'infoHash=' + infoHash, 'magnet 已由代码解析')
+  return info
+}
+
+/** 纯 HTTP 注册（无磁力/种子参数）：不下载视频、不生成种子；P2P 不可用，播放器走纯 HTTP。
+ *  P2P 需站长额外提供磁力（magnet）或 .torrent 直链（xs），由 registerWithMagnet 处理。 */
+async function registerHttpOnly(url, id, name) {
+  let baseName
+  try {
+    baseName = sanitize(name || path.basename(new URL(url).pathname) || 'video_' + id + '.mp4')
+  } catch (e) {
+    baseName = sanitize(name || 'video_' + id + '.mp4')
+  }
+  const info = {
+    id,
+    url,
+    rel: null,
+    localFile: null,
+    name: baseName,
+    size: null,          // 服务端不下载，大小由 HTTP HEAD 获取
+    infoHash: null,
+    magnetURI: null,     // 无种子 → 播放器不启用 P2P（纯 HTTP）
+    hasTorrent: false,
+    metaSource: null,
+    trackers: (config.webTorrentTrackers || []).slice(),
+    torrentUrl: null,
+    registeredAt: Date.now()
+  }
+  videos.set(url, info)
+  saveVideos()
+  console.log('[video-service] 纯 HTTP 注册（无种子，P2P 关闭）:', info.name)
   return info
 }
 
@@ -499,7 +511,6 @@ module.exports = {
   getVideoByExternalHost,
   listVideos,
   fetchVideoSize,
-  videosDir,
   extractInfoHash,
   extractXs,
   downloadBuffer,
