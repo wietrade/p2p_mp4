@@ -328,9 +328,10 @@
     var params = new URLSearchParams(location.search);
     // 默认演示视频（Kaltura 外链）：无 ?url= 时也走注册流程（拿 infoHash → 在线人数/磁力/种子，启用 P2P）
     var DEFAULT_URL = 'https://vodcdn.sg.kaltura.com/p/117/sp/11700/serveFlavor/entryId/0_9311zvk2/v/2/ev/2/flavorId/0_xdkx0iet/name/a.mp4';
+    var DEFAULT_TORRENT = 'https://wietrade.github.io/p2p_mp4/torrents/kaltura.mp4.torrent';   // 默认演示视频的种子（无参数访问也启用 P2P）
     var videoUrl = params.get('url') || DEFAULT_URL;
     var videoMagnet = params.get('magnet');
-    var videoTorrent = params.get('torrent');
+    var videoTorrent = params.get('torrent') || DEFAULT_TORRENT;
     var videoTrackers = params.get('tracker');   // 逗号分隔多 tracker
     var playerMagnet = null;        // 传给播放器的磁力（API 注册后返回，兜底用 URL 参数）
     var playerTorrentUrl = null;    // 传给播放器的 .torrent 直链（API 返回 /boot/ 地址，兜底用 URL 参数）
